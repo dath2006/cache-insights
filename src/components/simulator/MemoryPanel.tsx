@@ -15,10 +15,14 @@ import {
   TooltipProvider,
   TooltipTrigger,
 } from '@/components/ui/tooltip';
-import { HardDrive, Activity, Zap, Info, Database } from 'lucide-react';
+import { HardDrive, Activity, Zap, Info } from 'lucide-react';
 import { MemoryType, defaultMemoryConfigs } from '@/lib/cacheSimulator';
 
-export function MemoryPanel() {
+interface MemoryPanelProps {
+  embedded?: boolean;
+}
+
+export function MemoryPanel({ embedded = false }: MemoryPanelProps) {
   const memoryConfig = useSimulatorStore((s) => s.memoryConfig);
   const setMemoryConfig = useSimulatorStore((s) => s.setMemoryConfig);
   const memoryStats = useSimulatorStore((s) => s.memoryStats);
@@ -39,26 +43,16 @@ export function MemoryPanel() {
     return `${mbps.toFixed(0)} MB/s`;
   };
 
-  return (
-    <div className="glass-card rounded-xl p-5 space-y-5">
-      <div className="flex items-center gap-3 border-b border-border pb-4">
-        <div className="p-2 rounded-lg bg-accent/20">
-          <HardDrive className="text-accent" size={20} />
-        </div>
-        <h2 className="text-lg font-bold">Main Memory</h2>
-        <Badge variant="outline" className="ml-auto text-xs">
-          {memoryConfig.memoryType}
-        </Badge>
-      </div>
-
+  const content = (
+    <div className="space-y-4">
       {/* Memory Type */}
-      <div className="space-y-3">
-        <Label className="text-sm">Memory Type</Label>
+      <div className="space-y-2">
+        <Label className="text-xs">Memory Type</Label>
         <Select
           value={memoryConfig.memoryType}
           onValueChange={(v) => handleTypeChange(v as MemoryType)}
         >
-          <SelectTrigger className="bg-muted border-border">
+          <SelectTrigger className="bg-muted border-border h-8 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -72,10 +66,10 @@ export function MemoryPanel() {
       </div>
 
       {/* Memory Size */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         <div className="flex justify-between items-center">
-          <Label className="text-sm">Memory Size</Label>
-          <span className="font-mono text-accent font-bold">
+          <Label className="text-xs">Memory Size</Label>
+          <span className="font-mono text-accent text-xs font-bold">
             {memoryConfig.sizeMB >= 1024 
               ? `${(memoryConfig.sizeMB / 1024).toFixed(0)} GB`
               : `${memoryConfig.sizeMB} MB`}
@@ -87,33 +81,26 @@ export function MemoryPanel() {
           max={sizeOptions.length - 1}
           step={1}
           onValueChange={([idx]) => setMemoryConfig({ sizeMB: sizeOptions[idx] })}
-          className="py-2"
+          className="py-1"
         />
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>64 MB</span>
-          <span>4 GB</span>
-        </div>
       </div>
 
       {/* Latency */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         <div className="flex items-center gap-2">
-          <Label className="text-sm">Access Latency</Label>
+          <Label className="text-xs">Access Latency</Label>
           <TooltipProvider>
             <Tooltip>
               <TooltipTrigger asChild>
-                <Info size={14} className="text-muted-foreground cursor-help" />
+                <Info size={12} className="text-muted-foreground cursor-help" />
               </TooltipTrigger>
-              <TooltipContent className="max-w-xs p-3 text-sm">
-                <p>Memory access latency in CPU cycles. Used in AMAT calculation.</p>
-                <p className="mt-2 text-muted-foreground text-xs">
-                  DDR4: ~80 cycles, DDR5: ~70 cycles, SRAM: ~10 cycles
-                </p>
+              <TooltipContent className="max-w-xs p-2 text-xs">
+                <p>Memory access latency in CPU cycles.</p>
               </TooltipContent>
             </Tooltip>
           </TooltipProvider>
-          <span className="ml-auto font-mono text-accent font-bold">
-            {memoryConfig.latencyCycles} cycles
+          <span className="ml-auto font-mono text-accent text-xs font-bold">
+            {memoryConfig.latencyCycles} cyc
           </span>
         </div>
         <Slider
@@ -122,22 +109,18 @@ export function MemoryPanel() {
           max={200}
           step={5}
           onValueChange={([v]) => setMemoryConfig({ latencyCycles: v })}
-          className="py-2"
+          className="py-1"
         />
-        <div className="flex justify-between text-xs text-muted-foreground">
-          <span>5 (Fast)</span>
-          <span>200 (Slow)</span>
-        </div>
       </div>
 
       {/* Bus Width */}
-      <div className="space-y-3">
-        <Label className="text-sm">Bus Width</Label>
+      <div className="space-y-2">
+        <Label className="text-xs">Bus Width</Label>
         <Select
           value={memoryConfig.busWidthBits.toString()}
           onValueChange={(v) => setMemoryConfig({ busWidthBits: parseInt(v) })}
         >
-          <SelectTrigger className="bg-muted border-border">
+          <SelectTrigger className="bg-muted border-border h-8 text-xs">
             <SelectValue />
           </SelectTrigger>
           <SelectContent>
@@ -150,10 +133,10 @@ export function MemoryPanel() {
       </div>
 
       {/* Frequency */}
-      <div className="space-y-3">
+      <div className="space-y-2">
         <div className="flex justify-between items-center">
-          <Label className="text-sm">Frequency</Label>
-          <span className="font-mono text-accent font-bold">
+          <Label className="text-xs">Frequency</Label>
+          <span className="font-mono text-accent text-xs font-bold">
             {memoryConfig.frequencyMHz} MHz
           </span>
         </div>
@@ -163,56 +146,63 @@ export function MemoryPanel() {
           max={6400}
           step={100}
           onValueChange={([v]) => setMemoryConfig({ frequencyMHz: v })}
-          className="py-2"
+          className="py-1"
         />
       </div>
 
       {/* Memory Stats */}
       {memoryStats.totalAccesses > 0 && (
-        <div className="pt-4 border-t border-border space-y-3">
-          <div className="flex items-center gap-2 text-sm font-medium">
-            <Activity size={16} className="text-muted-foreground" />
-            Memory Statistics
+        <div className="pt-3 border-t border-border space-y-2">
+          <div className="flex items-center gap-2 text-xs font-medium">
+            <Activity size={14} className="text-muted-foreground" />
+            Statistics
           </div>
           
-          <div className="grid grid-cols-2 gap-3">
-            <div className="p-3 bg-muted/50 rounded-lg">
-              <div className="text-xs text-muted-foreground">Total Accesses</div>
-              <div className="font-mono font-bold text-accent">
+          <div className="grid grid-cols-2 gap-2">
+            <div className="p-2 bg-muted/50 rounded">
+              <div className="text-[10px] text-muted-foreground">Accesses</div>
+              <div className="font-mono text-xs font-bold text-accent">
                 {memoryStats.totalAccesses.toLocaleString()}
               </div>
             </div>
-            <div className="p-3 bg-muted/50 rounded-lg">
-              <div className="text-xs text-muted-foreground">Bytes Transferred</div>
-              <div className="font-mono font-bold text-accent">
+            <div className="p-2 bg-muted/50 rounded">
+              <div className="text-[10px] text-muted-foreground">Transferred</div>
+              <div className="font-mono text-xs font-bold text-accent">
                 {(memoryStats.bytesTransferred / 1024).toFixed(1)} KB
-              </div>
-            </div>
-            <div className="p-3 bg-muted/50 rounded-lg">
-              <div className="text-xs text-muted-foreground">Avg Latency</div>
-              <div className="font-mono font-bold text-accent">
-                {memoryStats.averageLatency.toFixed(1)} cyc
-              </div>
-            </div>
-            <div className="p-3 bg-muted/50 rounded-lg">
-              <div className="text-xs text-muted-foreground">Bandwidth Util.</div>
-              <div className="font-mono font-bold text-accent">
-                {memoryStats.bandwidthUtilization.toFixed(1)}%
               </div>
             </div>
           </div>
 
-          <div className="p-3 bg-gradient-to-r from-accent/10 to-primary/10 rounded-lg flex items-center justify-between">
-            <div className="flex items-center gap-2">
-              <Zap size={16} className="text-accent" />
-              <span className="text-sm">Peak Bandwidth</span>
+          <div className="p-2 bg-gradient-to-r from-accent/10 to-primary/10 rounded flex items-center justify-between">
+            <div className="flex items-center gap-1">
+              <Zap size={12} className="text-accent" />
+              <span className="text-xs">Peak BW</span>
             </div>
-            <span className="font-mono font-bold">
+            <span className="font-mono text-xs font-bold">
               {formatBandwidth(memoryStats.peakBandwidthMBps)}
             </span>
           </div>
         </div>
       )}
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <div className="glass-card rounded-xl p-5 space-y-5">
+      <div className="flex items-center gap-3 border-b border-border pb-4">
+        <div className="p-2 rounded-lg bg-accent/20">
+          <HardDrive className="text-accent" size={20} />
+        </div>
+        <h2 className="text-lg font-bold">Main Memory</h2>
+        <Badge variant="outline" className="ml-auto text-xs">
+          {memoryConfig.memoryType}
+        </Badge>
+      </div>
+      {content}
     </div>
   );
 }
