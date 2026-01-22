@@ -6,7 +6,10 @@ import { CacheGrid } from '@/components/simulator/CacheGrid';
 import { TraceInput } from '@/components/simulator/TraceInput';
 import { PlaybackControls } from '@/components/simulator/PlaybackControls';
 import { Optimizer } from '@/components/simulator/Optimizer';
+import { MemoryPanel } from '@/components/simulator/MemoryPanel';
+import { MemoryVisualizer } from '@/components/simulator/MemoryVisualizer';
 import { Cpu } from 'lucide-react';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
 const Index = () => {
   const initSimulator = useSimulatorStore((s) => s.initSimulator);
@@ -40,17 +43,35 @@ const Index = () => {
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
         {/* Left Sidebar - Config & Trace Input */}
         <div className="lg:col-span-3 space-y-4">
-          <ConfigPanel />
+          <Tabs defaultValue="cache" className="w-full">
+            <TabsList className="grid w-full grid-cols-2">
+              <TabsTrigger value="cache">Cache</TabsTrigger>
+              <TabsTrigger value="memory">Memory</TabsTrigger>
+            </TabsList>
+            <TabsContent value="cache" className="mt-4">
+              <ConfigPanel />
+            </TabsContent>
+            <TabsContent value="memory" className="mt-4">
+              <MemoryPanel />
+            </TabsContent>
+          </Tabs>
           <TraceInput />
         </div>
 
-        {/* Main Content - Cache Grid & Controls */}
-        <div className="lg:col-span-9 space-y-4">
+        {/* Main Content - Cache Grid & Memory Visualization */}
+        <div className="lg:col-span-6 space-y-4">
           <div className="h-[500px]">
             <CacheGrid />
           </div>
           <PlaybackControls />
           <Optimizer />
+        </div>
+
+        {/* Right Sidebar - Memory Hierarchy Visualization */}
+        <div className="lg:col-span-3">
+          <div className="h-[600px]">
+            <MemoryVisualizer />
+          </div>
         </div>
       </div>
     </div>

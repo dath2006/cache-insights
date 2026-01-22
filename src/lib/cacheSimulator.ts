@@ -2,6 +2,207 @@
 
 export type ReplacementPolicy = 'LRU' | 'FIFO' | 'LFU' | 'RANDOM';
 export type WritePolicy = 'write-back' | 'write-through';
+export type MemoryType = 'DDR3' | 'DDR4' | 'DDR5' | 'SRAM' | 'Custom';
+
+// ============= MEMORY SUBSYSTEM =============
+
+export interface MemoryConfig {
+  sizeMB: number;           // Memory size in MB
+  latencyCycles: number;    // Access latency in CPU cycles
+  busWidthBits: number;     // Bus width in bits (64, 128, 256)
+  frequencyMHz: number;     // Memory frequency in MHz
+  memoryType: MemoryType;   // DDR3, DDR4, DDR5, SRAM, Custom
+  burstLength: number;      // Burst length for DDR (4, 8, 16)
+}
+
+export interface MemoryRegion {
+  startAddress: number;
+  endAddress: number;
+  accessCount: number;
+  readCount: number;
+  writeCount: number;
+  lastAccessTime: number;
+}
+
+export interface MemoryStats {
+  totalReads: number;
+  totalWrites: number;
+  totalAccesses: number;
+  bytesTransferred: number;
+  averageLatency: number;
+  bandwidthUtilization: number;  // Percentage
+  peakBandwidthMBps: number;
+  effectiveBandwidthMBps: number;
+}
+
+export interface MemoryAccessResult {
+  address: number;
+  isWrite: boolean;
+  latencyCycles: number;
+  bytesTransferred: number;
+  regionIndex: number;
+}
+
+export const defaultMemoryConfigs: Record<MemoryType, Partial<MemoryConfig>> = {
+  'DDR3': { latencyCycles: 100, busWidthBits: 64, frequencyMHz: 1600, burstLength: 8 },
+  'DDR4': { latencyCycles: 80, busWidthBits: 64, frequencyMHz: 3200, burstLength: 8 },
+  'DDR5': { latencyCycles: 70, busWidthBits: 64, frequencyMHz: 4800, burstLength: 16 },
+  'SRAM': { latencyCycles: 10, busWidthBits: 128, frequencyMHz: 2000, burstLength: 1 },
+  'Custom': { latencyCycles: 100, busWidthBits: 64, frequencyMHz: 2400, burstLength: 8 },
+};
+
+export class MainMemory {
+  private config: MemoryConfig;
+  private stats: MemoryStats;
+  private regions: MemoryRegion[];
+  private accessHistory: MemoryAccessResult[];
+  private regionCount: number;
+  private regionSize: number;
+  private totalCycles: number;
+
+  constructor(config: MemoryConfig) {
+    this.config = config;
+    this.totalCycles = 0;
+    this.regionCount = 16; // Divide memory into 16 regions for visualization
+    this.regionSize = (config.sizeMB * 1024 * 1024) / this.regionCount;
+    
+    this.stats = {
+      totalReads: 0,
+      totalWrites: 0,
+      totalAccesses: 0,
+      bytesTransferred: 0,
+      averageLatency: 0,
+      bandwidthUtilization: 0,
+      peakBandwidthMBps: this.calculatePeakBandwidth(),
+      effectiveBandwidthMBps: 0,
+    };
+    
+    this.regions = [];
+    this.accessHistory = [];
+    
+    for (let i = 0; i < this.regionCount; i++) {
+      this.regions.push({
+        startAddress: i * this.regionSize,
+        endAddress: (i + 1) * this.regionSize - 1,
+        accessCount: 0,
+        readCount: 0,
+        writeCount: 0,
+        lastAccessTime: 0,
+      });
+    }
+  }
+
+  private calculatePeakBandwidth(): number {
+    // Peak bandwidth in MB/s = (busWidth * frequency * 2) / 8 for DDR
+    const multiplier = this.config.memoryType.startsWith('DDR') ? 2 : 1;
+    return (this.config.busWidthBits * this.config.frequencyMHz * multiplier) / 8 / 1000;
+  }
+
+  access(address: number, isWrite: boolean, blockSize: number = 64): MemoryAccessResult {
+    this.totalCycles++;
+    
+    // Wrap address to memory size
+    const memorySize = this.config.sizeMB * 1024 * 1024;
+    const wrappedAddress = address % memorySize;
+    
+    // Find region
+    const regionIndex = Math.floor(wrappedAddress / this.regionSize);
+    const region = this.regions[Math.min(regionIndex, this.regionCount - 1)];
+    
+    // Update region stats
+    region.accessCount++;
+    region.lastAccessTime = this.totalCycles;
+    if (isWrite) {
+      region.writeCount++;
+      this.stats.totalWrites++;
+    } else {
+      region.readCount++;
+      this.stats.totalReads++;
+    }
+    
+    // Calculate transfer size (burst-aligned)
+    const bytesPerBurst = (this.config.busWidthBits / 8) * this.config.burstLength;
+    const transferSize = Math.max(blockSize, bytesPerBurst);
+    
+    this.stats.totalAccesses++;
+    this.stats.bytesTransferred += transferSize;
+    
+    // Calculate effective latency (includes burst transfer time)
+    const burstCycles = Math.ceil(transferSize / (this.config.busWidthBits / 8));
+    const totalLatency = this.config.latencyCycles + burstCycles;
+    
+    // Update average latency
+    this.stats.averageLatency = 
+      ((this.stats.averageLatency * (this.stats.totalAccesses - 1)) + totalLatency) / 
+      this.stats.totalAccesses;
+    
+    // Calculate bandwidth utilization
+    this.stats.effectiveBandwidthMBps = 
+      (this.stats.bytesTransferred / this.totalCycles) * this.config.frequencyMHz;
+    this.stats.bandwidthUtilization = 
+      (this.stats.effectiveBandwidthMBps / this.stats.peakBandwidthMBps) * 100;
+    
+    const result: MemoryAccessResult = {
+      address: wrappedAddress,
+      isWrite,
+      latencyCycles: totalLatency,
+      bytesTransferred: transferSize,
+      regionIndex,
+    };
+    
+    this.accessHistory.push(result);
+    if (this.accessHistory.length > 1000) {
+      this.accessHistory.shift();
+    }
+    
+    return result;
+  }
+
+  getConfig(): MemoryConfig {
+    return { ...this.config };
+  }
+
+  getStats(): MemoryStats {
+    return { ...this.stats };
+  }
+
+  getRegions(): MemoryRegion[] {
+    return this.regions.map(r => ({ ...r }));
+  }
+
+  getAccessHistory(): MemoryAccessResult[] {
+    return [...this.accessHistory];
+  }
+
+  getLatency(): number {
+    return this.config.latencyCycles;
+  }
+
+  reset(): void {
+    this.totalCycles = 0;
+    this.stats = {
+      totalReads: 0,
+      totalWrites: 0,
+      totalAccesses: 0,
+      bytesTransferred: 0,
+      averageLatency: 0,
+      bandwidthUtilization: 0,
+      peakBandwidthMBps: this.calculatePeakBandwidth(),
+      effectiveBandwidthMBps: 0,
+    };
+    
+    for (const region of this.regions) {
+      region.accessCount = 0;
+      region.readCount = 0;
+      region.writeCount = 0;
+      region.lastAccessTime = 0;
+    }
+    
+    this.accessHistory = [];
+  }
+}
+
+// ============= CACHE SUBSYSTEM =============
 
 export interface CacheBlock {
   valid: boolean;
@@ -24,6 +225,7 @@ export interface AccessResult {
   evicted: boolean;
   evictedTag?: number;
   level?: 'L1' | 'L2'; // Which cache level was accessed
+  memoryAccessed?: boolean; // Did this access go to main memory?
 }
 
 export interface CacheStats {
@@ -290,15 +492,37 @@ export class CacheSimulator {
   }
 }
 
-// Multi-Level Cache Simulator (L1 + L2)
+// Multi-Level Cache Simulator with Main Memory (L1 + L2 + Memory)
+export interface HierarchyAccessResult {
+  l1Result?: AccessResult;
+  l2Result?: AccessResult;
+  memoryResult?: MemoryAccessResult;
+  totalLatency: number;
+  dataPath: ('L1' | 'L2' | 'Memory')[];
+}
+
 export class MultiLevelCacheSimulator {
   private l1: CacheSimulator | null = null;
   private l2: CacheSimulator | null = null;
+  private memory: MainMemory;
   private config: MultiLevelCacheConfig;
+  private memoryConfig: MemoryConfig;
   private combinedStats: CacheStats;
+  private memoryAccesses: number;
 
-  constructor(config: MultiLevelCacheConfig) {
+  constructor(config: MultiLevelCacheConfig, memoryConfig?: MemoryConfig) {
     this.config = config;
+    this.memoryConfig = memoryConfig ?? {
+      sizeMB: 256,
+      latencyCycles: 100,
+      busWidthBits: 64,
+      frequencyMHz: 3200,
+      memoryType: 'DDR4',
+      burstLength: 8,
+    };
+    
+    this.memory = new MainMemory(this.memoryConfig);
+    this.memoryAccesses = 0;
     
     if (config.enabled.l1) {
       this.l1 = new CacheSimulator(config.l1);
@@ -316,21 +540,30 @@ export class MultiLevelCacheSimulator {
     };
   }
 
-  access(address: number, isWrite: boolean): { l1Result?: AccessResult; l2Result?: AccessResult } {
+  access(address: number, isWrite: boolean): HierarchyAccessResult {
     this.combinedStats.totalAccesses++;
     
     let l1Result: AccessResult | undefined;
     let l2Result: AccessResult | undefined;
+    let memoryResult: MemoryAccessResult | undefined;
+    const dataPath: ('L1' | 'L2' | 'Memory')[] = [];
+    let totalLatency = 0;
+    
+    // L1 hit time
+    const l1HitTime = 1;
+    const l2HitTime = 10;
     
     // Try L1 first
     if (this.l1) {
       l1Result = this.l1.access(address, isWrite);
       l1Result.level = 'L1';
+      dataPath.push('L1');
+      totalLatency += l1HitTime;
       
       if (l1Result.hit) {
         this.combinedStats.hits++;
         this.combinedStats.hitRate = this.combinedStats.hits / this.combinedStats.totalAccesses;
-        return { l1Result };
+        return { l1Result, totalLatency, dataPath };
       }
     }
     
@@ -338,19 +571,32 @@ export class MultiLevelCacheSimulator {
     if (this.l2) {
       l2Result = this.l2.access(address, isWrite);
       l2Result.level = 'L2';
+      dataPath.push('L2');
+      totalLatency += l2HitTime;
       
       if (l2Result.hit) {
         this.combinedStats.hits++;
         this.combinedStats.hitRate = this.combinedStats.hits / this.combinedStats.totalAccesses;
-        return { l1Result, l2Result };
+        return { l1Result, l2Result, totalLatency, dataPath };
       }
     }
     
-    // Both missed
+    // Both missed, access main memory
+    const blockSize = this.l1?.getConfig().blockSize ?? this.l2?.getConfig().blockSize ?? 64;
+    memoryResult = this.memory.access(address, isWrite, blockSize);
+    dataPath.push('Memory');
+    totalLatency += memoryResult.latencyCycles;
+    this.memoryAccesses++;
+    
+    // Mark the cache results as having accessed memory
+    if (l1Result) l1Result.memoryAccessed = true;
+    if (l2Result) l2Result.memoryAccessed = true;
+    
+    // Miss in all levels
     this.combinedStats.misses++;
     this.combinedStats.hitRate = this.combinedStats.hits / this.combinedStats.totalAccesses;
     
-    return { l1Result, l2Result };
+    return { l1Result, l2Result, memoryResult, totalLatency, dataPath };
   }
 
   getL1(): CacheSimulator | null {
@@ -361,12 +607,32 @@ export class MultiLevelCacheSimulator {
     return this.l2;
   }
 
+  getMemory(): MainMemory {
+    return this.memory;
+  }
+
   getL1Stats(): CacheStats | null {
     return this.l1?.getStats() ?? null;
   }
 
   getL2Stats(): CacheStats | null {
     return this.l2?.getStats() ?? null;
+  }
+
+  getMemoryStats(): MemoryStats {
+    return this.memory.getStats();
+  }
+
+  getMemoryRegions(): MemoryRegion[] {
+    return this.memory.getRegions();
+  }
+
+  getMemoryConfig(): MemoryConfig {
+    return this.memory.getConfig();
+  }
+
+  getMemoryAccesses(): number {
+    return this.memoryAccesses;
   }
 
   getCombinedStats(): CacheStats {
@@ -387,6 +653,8 @@ export class MultiLevelCacheSimulator {
   reset(): void {
     this.l1?.reset();
     this.l2?.reset();
+    this.memory.reset();
+    this.memoryAccesses = 0;
     this.combinedStats = {
       hits: 0,
       misses: 0,
@@ -396,29 +664,30 @@ export class MultiLevelCacheSimulator {
     };
   }
 
-  // Calculate combined AMAT for multi-level cache
+  // Calculate combined AMAT for multi-level cache with actual memory latency
   calculateAMAT(
     l1HitTime: number = 1,
     l2HitTime: number = 10,
-    memoryPenalty: number = 100
+    memoryPenalty?: number
   ): number {
+    const actualMemoryPenalty = memoryPenalty ?? this.memoryConfig.latencyCycles;
     const l1Stats = this.l1?.getStats();
     const l2Stats = this.l2?.getStats();
     
     if (!this.config.enabled.l1 && !this.config.enabled.l2) {
-      return memoryPenalty;
+      return actualMemoryPenalty;
     }
     
     if (!this.config.enabled.l2) {
       // Only L1
       const l1MissRate = l1Stats ? 1 - l1Stats.hitRate : 1;
-      return l1HitTime + l1MissRate * memoryPenalty;
+      return l1HitTime + l1MissRate * actualMemoryPenalty;
     }
     
     if (!this.config.enabled.l1) {
       // Only L2
       const l2MissRate = l2Stats ? 1 - l2Stats.hitRate : 1;
-      return l2HitTime + l2MissRate * memoryPenalty;
+      return l2HitTime + l2MissRate * actualMemoryPenalty;
     }
     
     // Both L1 and L2
@@ -426,7 +695,7 @@ export class MultiLevelCacheSimulator {
     const l2MissRate = l2Stats ? 1 - l2Stats.hitRate : 1;
     
     // AMAT = L1 hit time + L1 miss rate * (L2 hit time + L2 miss rate * Memory penalty)
-    return l1HitTime + l1MissRate * (l2HitTime + l2MissRate * memoryPenalty);
+    return l1HitTime + l1MissRate * (l2HitTime + l2MissRate * actualMemoryPenalty);
   }
 }
 
