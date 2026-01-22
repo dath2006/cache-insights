@@ -1,9 +1,9 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { useSimulatorStore } from '@/store/simulatorStore';
 import { Badge } from '@/components/ui/badge';
 import { Button } from '@/components/ui/button';
-import { X, Minimize2, Maximize2, GripHorizontal } from 'lucide-react';
-import { motion } from 'framer-motion';
+import { X, Minimize2, Maximize2, GripHorizontal, Check, XIcon } from 'lucide-react';
+import { motion, AnimatePresence } from 'framer-motion';
 import { cn } from '@/lib/utils';
 
 interface FloatingTraceViewerProps {
@@ -11,18 +11,27 @@ interface FloatingTraceViewerProps {
   onClose: () => void;
 }
 
+interface TraceResult {
+  l1Hit?: boolean;
+  l2Hit?: boolean;
+  memoryAccess?: boolean;
+}
+
 export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps) {
   const trace = useSimulatorStore((s) => s.trace);
   const multiLevelConfig = useSimulatorStore((s) => s.multiLevelConfig);
   const traceIndex = useSimulatorStore((s) => s.traceIndex);
+  const lastAccess = useSimulatorStore((s) => s.lastAccess);
 
   const [position, setPosition] = useState({ x: 100, y: 100 });
-  const [size, setSize] = useState({ width: 450, height: 400 });
+  const [size, setSize] = useState({ width: 500, height: 400 });
   const [isDragging, setIsDragging] = useState(false);
   const [isResizing, setIsResizing] = useState<string | null>(null);
   const [isMinimized, setIsMinimized] = useState(false);
+  const [traceResults, setTraceResults] = useState<Map<number, TraceResult>>(new Map());
   const containerRef = useRef<HTMLDivElement>(null);
   const scrollRef = useRef<HTMLDivElement>(null);
+  const currentRowRef = useRef<HTMLDivElement>(null);
   const dragOffset = useRef({ x: 0, y: 0 });
   const resizeStart = useRef({ x: 0, y: 0, width: 0, height: 0 });
 
@@ -47,25 +56,45 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
     return '0x' + num.toString(16).toUpperCase().padStart(padLength, '0');
   };
 
-  // Auto-scroll to current trace index
+  // Track results as simulation progresses
   useEffect(() => {
-    if (scrollRef.current && traceIndex > 0 && open) {
-      // Small delay to ensure DOM is rendered
-      const timeoutId = setTimeout(() => {
-        if (scrollRef.current) {
-          const rowHeight = 28; // actual row height
-          const headerHeight = 32; // sticky header
-          const targetRow = traceIndex - 1;
-          const containerHeight = scrollRef.current.clientHeight;
-          const scrollTop = targetRow * rowHeight - containerHeight / 2 + rowHeight / 2 + headerHeight;
+    if (lastAccess && traceIndex > 0) {
+      setTraceResults(prev => {
+        const newMap = new Map(prev);
+        newMap.set(traceIndex - 1, {
+          l1Hit: lastAccess.l1?.hit,
+          l2Hit: lastAccess.l2?.hit,
+          memoryAccess: lastAccess.memoryAccessed,
+        });
+        return newMap;
+      });
+    }
+  }, [lastAccess, traceIndex]);
+
+  // Reset results when trace changes
+  useEffect(() => {
+    setTraceResults(new Map());
+  }, [trace]);
+
+  // Auto-scroll to current trace index using ref
+  useEffect(() => {
+    if (open && currentRowRef.current && scrollRef.current && traceIndex > 0) {
+      requestAnimationFrame(() => {
+        if (currentRowRef.current && scrollRef.current) {
+          const container = scrollRef.current;
+          const row = currentRowRef.current;
+          const containerHeight = container.clientHeight;
+          const rowTop = row.offsetTop;
+          const rowHeight = row.offsetHeight;
           
-          scrollRef.current.scrollTo({
+          // Center the current row in the viewport
+          const scrollTop = rowTop - containerHeight / 2 + rowHeight / 2;
+          container.scrollTo({
             top: Math.max(0, scrollTop),
             behavior: 'smooth'
           });
         }
-      }, 50);
-      return () => clearTimeout(timeoutId);
+      });
     }
   }, [traceIndex, open]);
 
@@ -80,7 +109,7 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
     }
   };
 
-  const handleMouseMove = (e: MouseEvent) => {
+  const handleMouseMove = useCallback((e: MouseEvent) => {
     if (isDragging) {
       setPosition({
         x: Math.max(0, Math.min(window.innerWidth - size.width, e.clientX - dragOffset.current.x)),
@@ -97,10 +126,10 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
       let newY = position.y;
 
       if (isResizing.includes('e')) {
-        newWidth = Math.max(350, resizeStart.current.width + dx);
+        newWidth = Math.max(400, resizeStart.current.width + dx);
       }
       if (isResizing.includes('w')) {
-        newWidth = Math.max(350, resizeStart.current.width - dx);
+        newWidth = Math.max(400, resizeStart.current.width - dx);
         newX = position.x + (resizeStart.current.width - newWidth);
       }
       if (isResizing.includes('s')) {
@@ -116,12 +145,12 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
         setPosition({ x: newX, y: newY });
       }
     }
-  };
+  }, [isDragging, isResizing, position, size]);
 
-  const handleMouseUp = () => {
+  const handleMouseUp = useCallback(() => {
     setIsDragging(false);
     setIsResizing(null);
-  };
+  }, []);
 
   const startResize = (e: React.MouseEvent, direction: string) => {
     e.preventDefault();
@@ -144,170 +173,211 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
         window.removeEventListener('mouseup', handleMouseUp);
       };
     }
-  }, [isDragging, isResizing]);
+  }, [isDragging, isResizing, handleMouseMove, handleMouseUp]);
+
+  const getResultBadge = (idx: number) => {
+    const result = traceResults.get(idx);
+    if (!result) return null;
+
+    if (result.l1Hit) {
+      return (
+        <Badge className="bg-success/20 text-success h-4 text-[9px] gap-0.5">
+          <Check size={8} /> L1
+        </Badge>
+      );
+    }
+    if (result.l2Hit) {
+      return (
+        <Badge className="bg-secondary/20 text-secondary h-4 text-[9px] gap-0.5">
+          <Check size={8} /> L2
+        </Badge>
+      );
+    }
+    if (result.memoryAccess) {
+      return (
+        <Badge className="bg-destructive/20 text-destructive h-4 text-[9px] gap-0.5">
+          <XIcon size={8} /> Mem
+        </Badge>
+      );
+    }
+    return (
+      <Badge className="bg-destructive/20 text-destructive h-4 text-[9px] gap-0.5">
+        <XIcon size={8} /> Miss
+      </Badge>
+    );
+  };
 
   if (!open) return null;
 
   return (
-    <motion.div
-      ref={containerRef}
-      initial={{ opacity: 0, scale: 0.9 }}
-      animate={{ opacity: 1, scale: 1 }}
-      exit={{ opacity: 0, scale: 0.9 }}
-      className="fixed z-50 glass-card rounded-xl overflow-hidden shadow-2xl border border-border/50"
-      style={{
-        left: position.x,
-        top: position.y,
-        width: size.width,
-        height: isMinimized ? 48 : size.height,
-      }}
-      onMouseDown={handleMouseDown}
-    >
-      {/* Header / Drag Handle */}
-      <div className="drag-handle flex items-center justify-between px-3 py-2 bg-muted/50 cursor-move border-b border-border/50">
-        <div className="flex items-center gap-2">
-          <GripHorizontal size={14} className="text-muted-foreground" />
-          <span className="font-semibold text-sm">Trace Viewer</span>
-          <Badge variant="outline" className="text-[10px] h-5">
-            {trace.length} entries
-          </Badge>
-          {traceIndex > 0 && (
-            <Badge className="bg-primary/20 text-primary text-[10px] h-5">
-              Step {traceIndex}
+    <AnimatePresence>
+      <motion.div
+        ref={containerRef}
+        initial={{ opacity: 0, scale: 0.9 }}
+        animate={{ opacity: 1, scale: 1 }}
+        exit={{ opacity: 0, scale: 0.9 }}
+        className="fixed z-50 glass-card rounded-xl overflow-hidden shadow-2xl border border-border/50"
+        style={{
+          left: position.x,
+          top: position.y,
+          width: size.width,
+          height: isMinimized ? 48 : size.height,
+        }}
+        onMouseDown={handleMouseDown}
+      >
+        {/* Header / Drag Handle */}
+        <div className="drag-handle flex items-center justify-between px-3 py-2 bg-muted/50 cursor-move border-b border-border/50">
+          <div className="flex items-center gap-2">
+            <GripHorizontal size={14} className="text-muted-foreground" />
+            <span className="font-semibold text-sm">Trace Viewer</span>
+            <Badge variant="outline" className="text-[10px] h-5">
+              {trace.length} entries
             </Badge>
-          )}
-        </div>
-        <div className="flex items-center gap-1">
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6"
-            onClick={() => setIsMinimized(!isMinimized)}
-          >
-            {isMinimized ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
-          </Button>
-          <Button
-            variant="ghost"
-            size="icon"
-            className="h-6 w-6 hover:bg-destructive/20 hover:text-destructive"
-            onClick={onClose}
-          >
-            <X size={12} />
-          </Button>
-        </div>
-      </div>
-
-      {/* Content */}
-      {!isMinimized && (
-        <>
-          {/* Legend */}
-          <div className="flex items-center gap-4 px-3 py-2 bg-muted/30 text-[10px] border-b border-border/30">
-            <div className="flex items-center gap-1">
-              <Badge className="bg-primary/20 text-primary hover:bg-primary/20 h-4 text-[9px]">R</Badge>
-              <span className="text-muted-foreground">Read</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <Badge className="bg-secondary/20 text-secondary hover:bg-secondary/20 h-4 text-[9px]">W</Badge>
-              <span className="text-muted-foreground">Write</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded bg-primary/50" />
-              <span className="text-muted-foreground">Tag</span>
-            </div>
-            <div className="flex items-center gap-1">
-              <div className="w-2 h-2 rounded bg-secondary/50" />
-              <span className="text-muted-foreground">Index</span>
-            </div>
-          </div>
-
-          {/* Trace List */}
-          <div 
-            ref={scrollRef}
-            className="overflow-auto"
-            style={{ height: size.height - 100 }}
-          >
-            {trace.length === 0 ? (
-              <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
-                No trace loaded
-              </div>
-            ) : (
-              <div className="p-1">
-                {/* Header */}
-                <div className="grid grid-cols-[40px_40px_1fr_1fr] gap-1 px-2 py-1 text-[10px] font-semibold text-muted-foreground border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm">
-                  <span>#</span>
-                  <span>Op</span>
-                  <span>Address</span>
-                  <span>Breakdown</span>
-                </div>
-                
-                {trace.map((entry, idx) => {
-                  const { tag, index, offset } = extractComponents(entry.address);
-                  const isCurrent = idx === traceIndex - 1;
-                  const isPast = idx < traceIndex - 1;
-                  
-                  return (
-                    <div
-                      key={idx}
-                      className={cn(
-                        "grid grid-cols-[40px_40px_1fr_1fr] gap-1 px-2 py-1.5 text-xs font-mono transition-all duration-200",
-                        isCurrent && "bg-primary/20 border-l-2 border-primary rounded-r-md",
-                        isPast && "opacity-40",
-                        !isCurrent && !isPast && "hover:bg-muted/30"
-                      )}
-                    >
-                      <span className="text-muted-foreground text-[10px]">{idx + 1}</span>
-                      <Badge
-                        className={cn(
-                          "w-fit h-4 text-[9px]",
-                          entry.isWrite
-                            ? 'bg-secondary/20 text-secondary hover:bg-secondary/20'
-                            : 'bg-primary/20 text-primary hover:bg-primary/20'
-                        )}
-                      >
-                        {entry.isWrite ? 'W' : 'R'}
-                      </Badge>
-                      <span className="text-foreground text-[11px]">{formatHex(entry.address)}</span>
-                      <div className="flex items-center gap-0.5 text-[9px]">
-                        <span className="px-1 py-0.5 rounded bg-primary/20 text-primary" title="Tag">
-                          {formatHex(tag, 4)}
-                        </span>
-                        <span className="px-1 py-0.5 rounded bg-secondary/20 text-secondary" title="Index">
-                          {index}
-                        </span>
-                        <span className="px-1 py-0.5 rounded bg-muted text-muted-foreground" title="Offset">
-                          {offset}
-                        </span>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
+            {traceIndex > 0 && (
+              <Badge className="bg-primary/20 text-primary text-[10px] h-5">
+                Step {traceIndex}
+              </Badge>
             )}
           </div>
+          <div className="flex items-center gap-1">
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6"
+              onClick={() => setIsMinimized(!isMinimized)}
+            >
+              {isMinimized ? <Maximize2 size={12} /> : <Minimize2 size={12} />}
+            </Button>
+            <Button
+              variant="ghost"
+              size="icon"
+              className="h-6 w-6 hover:bg-destructive/20 hover:text-destructive"
+              onClick={onClose}
+            >
+              <X size={12} />
+            </Button>
+          </div>
+        </div>
 
-          {/* Resize Handles */}
-          <div 
-            className="absolute top-0 left-0 w-1 h-full cursor-w-resize hover:bg-accent/50"
-            onMouseDown={(e) => startResize(e, 'w')}
-          />
-          <div 
-            className="absolute top-0 right-0 w-1 h-full cursor-e-resize hover:bg-accent/50"
-            onMouseDown={(e) => startResize(e, 'e')}
-          />
-          <div 
-            className="absolute bottom-0 left-0 w-full h-1 cursor-s-resize hover:bg-accent/50"
-            onMouseDown={(e) => startResize(e, 's')}
-          />
-          <div 
-            className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize hover:bg-accent/50 rounded-tl-md"
-            onMouseDown={(e) => startResize(e, 'se')}
-          />
-          <div 
-            className="absolute bottom-0 left-0 w-4 h-4 cursor-sw-resize hover:bg-accent/50 rounded-tr-md"
-            onMouseDown={(e) => startResize(e, 'sw')}
-          />
-        </>
-      )}
-    </motion.div>
+        {/* Content */}
+        {!isMinimized && (
+          <>
+            {/* Legend */}
+            <div className="flex items-center gap-4 px-3 py-2 bg-muted/30 text-[10px] border-b border-border/30">
+              <div className="flex items-center gap-1">
+                <Badge className="bg-primary/20 text-primary hover:bg-primary/20 h-4 text-[9px]">R</Badge>
+                <span className="text-muted-foreground">Read</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Badge className="bg-secondary/20 text-secondary hover:bg-secondary/20 h-4 text-[9px]">W</Badge>
+                <span className="text-muted-foreground">Write</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Badge className="bg-success/20 text-success h-4 text-[9px]">Hit</Badge>
+                <span className="text-muted-foreground">Cache Hit</span>
+              </div>
+              <div className="flex items-center gap-1">
+                <Badge className="bg-destructive/20 text-destructive h-4 text-[9px]">Miss</Badge>
+                <span className="text-muted-foreground">Cache Miss</span>
+              </div>
+            </div>
+
+            {/* Trace List */}
+            <div 
+              ref={scrollRef}
+              className="overflow-auto"
+              style={{ height: size.height - 100 }}
+            >
+              {trace.length === 0 ? (
+                <div className="flex items-center justify-center h-full text-muted-foreground text-sm">
+                  No trace loaded
+                </div>
+              ) : (
+                <div className="p-1">
+                  {/* Header */}
+                  <div className="grid grid-cols-[40px_40px_50px_1fr_1fr] gap-1 px-2 py-1 text-[10px] font-semibold text-muted-foreground border-b border-border sticky top-0 bg-background/95 backdrop-blur-sm z-10">
+                    <span>#</span>
+                    <span>Op</span>
+                    <span>Result</span>
+                    <span>Address</span>
+                    <span>Breakdown</span>
+                  </div>
+                  
+                  {trace.map((entry, idx) => {
+                    const { tag, index, offset } = extractComponents(entry.address);
+                    const isCurrent = idx === traceIndex - 1;
+                    const isPast = idx < traceIndex - 1;
+                    const isNext = idx === traceIndex;
+                    
+                    return (
+                      <div
+                        key={idx}
+                        ref={isCurrent ? currentRowRef : null}
+                        className={cn(
+                          "grid grid-cols-[40px_40px_50px_1fr_1fr] gap-1 px-2 py-1.5 text-xs font-mono transition-all duration-200",
+                          isCurrent && "bg-primary/20 border-l-2 border-primary rounded-r-md",
+                          isNext && "bg-muted/30 border-l-2 border-muted-foreground/30",
+                          isPast && "opacity-50",
+                          !isCurrent && !isPast && !isNext && "hover:bg-muted/20"
+                        )}
+                      >
+                        <span className="text-muted-foreground text-[10px]">{idx + 1}</span>
+                        <Badge
+                          className={cn(
+                            "w-fit h-4 text-[9px]",
+                            entry.isWrite
+                              ? 'bg-secondary/20 text-secondary hover:bg-secondary/20'
+                              : 'bg-primary/20 text-primary hover:bg-primary/20'
+                          )}
+                        >
+                          {entry.isWrite ? 'W' : 'R'}
+                        </Badge>
+                        <div className="flex items-center">
+                          {getResultBadge(idx)}
+                        </div>
+                        <span className="text-foreground text-[11px]">{formatHex(entry.address)}</span>
+                        <div className="flex items-center gap-0.5 text-[9px]">
+                          <span className="px-1 py-0.5 rounded bg-primary/20 text-primary" title="Tag">
+                            {formatHex(tag, 4)}
+                          </span>
+                          <span className="px-1 py-0.5 rounded bg-secondary/20 text-secondary" title="Index">
+                            {index}
+                          </span>
+                          <span className="px-1 py-0.5 rounded bg-muted text-muted-foreground" title="Offset">
+                            {offset}
+                          </span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div>
+
+            {/* Resize Handles */}
+            <div 
+              className="absolute top-0 left-0 w-1 h-full cursor-w-resize hover:bg-accent/50"
+              onMouseDown={(e) => startResize(e, 'w')}
+            />
+            <div 
+              className="absolute top-0 right-0 w-1 h-full cursor-e-resize hover:bg-accent/50"
+              onMouseDown={(e) => startResize(e, 'e')}
+            />
+            <div 
+              className="absolute bottom-0 left-0 w-full h-1 cursor-s-resize hover:bg-accent/50"
+              onMouseDown={(e) => startResize(e, 's')}
+            />
+            <div 
+              className="absolute bottom-0 right-0 w-4 h-4 cursor-se-resize hover:bg-accent/50 rounded-tl-md"
+              onMouseDown={(e) => startResize(e, 'se')}
+            />
+            <div 
+              className="absolute bottom-0 left-0 w-4 h-4 cursor-sw-resize hover:bg-accent/50 rounded-tr-md"
+              onMouseDown={(e) => startResize(e, 'sw')}
+            />
+          </>
+        )}
+      </motion.div>
+    </AnimatePresence>
   );
 }
