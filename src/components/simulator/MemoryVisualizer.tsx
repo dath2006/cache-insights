@@ -27,7 +27,10 @@ export function MemoryVisualizer() {
     return 'bg-red-500/60';
   };
 
-  const formatAddress = (addr: number) => `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
+  const formatAddress = (addr: number) => {
+    if (addr === 0 && memoryStats.totalAccesses === 0) return '---';
+    return `0x${addr.toString(16).toUpperCase().padStart(8, '0')}`;
+  };
   const formatSize = (bytes: number) => {
     if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(0)} MB`;
     if (bytes >= 1024) return `${(bytes / 1024).toFixed(0)} KB`;
@@ -174,7 +177,7 @@ export function MemoryVisualizer() {
                     title={`Region ${idx}: ${region.accessCount} accesses`}
                   >
                     <div className="text-[8px] font-mono text-muted-foreground truncate">
-                      {formatAddress(region.startAddress).slice(0, 6)}
+                      {region.accessCount > 0 ? formatAddress(region.startAddress).slice(0, 10) : '---'}
                     </div>
                     <div className="text-[10px] font-bold">
                       {region.accessCount > 0 ? region.accessCount : '-'}

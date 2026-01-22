@@ -107,17 +107,17 @@ export function PlaybackControls() {
         </div>
 
         {/* Speed control */}
-        <div className="flex items-center gap-3 min-w-[140px]">
+        <div className="flex items-center gap-3 min-w-[160px]">
           <FastForward size={14} className="text-muted-foreground" />
           <Slider
             value={[playbackSpeed]}
             min={1}
-            max={100}
+            max={1000}
             step={1}
             onValueChange={([v]) => setPlaybackSpeed(v)}
             className="flex-1"
           />
-          <span className="text-xs font-mono text-muted-foreground w-8">
+          <span className="text-xs font-mono text-muted-foreground w-12">
             {playbackSpeed}x
           </span>
         </div>

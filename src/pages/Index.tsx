@@ -8,6 +8,7 @@ import { PlaybackControls } from '@/components/simulator/PlaybackControls';
 import { Optimizer } from '@/components/simulator/Optimizer';
 import { MemoryPanel } from '@/components/simulator/MemoryPanel';
 import { MemoryVisualizer } from '@/components/simulator/MemoryVisualizer';
+import { ConfigComparison } from '@/components/simulator/ConfigComparison';
 import { Cpu } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 
@@ -64,7 +65,12 @@ const Index = () => {
             <CacheGrid />
           </div>
           <PlaybackControls />
-          <Optimizer />
+          <div className="flex gap-4">
+            <div className="flex-1">
+              <Optimizer />
+            </div>
+            <ConfigComparison />
+          </div>
         </div>
 
         {/* Right Sidebar - Memory Hierarchy Visualization */}
