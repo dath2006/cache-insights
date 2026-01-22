@@ -22,10 +22,15 @@ export function PlaybackControls() {
 
   useEffect(() => {
     if (playbackState === 'playing' && !isComplete) {
-      const interval = Math.max(10, 500 / playbackSpeed);
+      // For high speeds, step multiple times per interval
+      const baseInterval = 16; // ~60fps
+      const stepsPerInterval = Math.max(1, Math.floor(playbackSpeed / 10));
+      
       intervalRef.current = window.setInterval(() => {
-        stepForward();
-      }, interval);
+        for (let i = 0; i < stepsPerInterval; i++) {
+          stepForward();
+        }
+      }, baseInterval);
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
