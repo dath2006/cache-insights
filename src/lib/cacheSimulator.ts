@@ -57,14 +57,20 @@ export class MainMemory {
   private regions: MemoryRegion[];
   private accessHistory: MemoryAccessResult[];
   private regionCount: number;
-  private regionSize: number;
   private totalCycles: number;
+  private minAddressSeen: number;
+  private maxAddressSeen: number;
+  private dynamicRegionSize: number;
 
   constructor(config: MemoryConfig) {
     this.config = config;
     this.totalCycles = 0;
     this.regionCount = 16; // Divide memory into 16 regions for visualization
-    this.regionSize = (config.sizeMB * 1024 * 1024) / this.regionCount;
+    
+    // Start with dynamic region tracking - will adapt to actual address range used
+    this.minAddressSeen = Infinity;
+    this.maxAddressSeen = 0;
+    this.dynamicRegionSize = 0;
     
     this.stats = {
       totalReads: 0,
@@ -80,10 +86,11 @@ export class MainMemory {
     this.regions = [];
     this.accessHistory = [];
     
+    // Initialize regions with placeholder addresses (will be updated dynamically)
     for (let i = 0; i < this.regionCount; i++) {
       this.regions.push({
-        startAddress: i * this.regionSize,
-        endAddress: (i + 1) * this.regionSize - 1,
+        startAddress: 0,
+        endAddress: 0,
         accessCount: 0,
         readCount: 0,
         writeCount: 0,
@@ -105,9 +112,26 @@ export class MainMemory {
     const memorySize = this.config.sizeMB * 1024 * 1024;
     const wrappedAddress = address % memorySize;
     
-    // Find region
-    const regionIndex = Math.floor(wrappedAddress / this.regionSize);
-    const region = this.regions[Math.min(regionIndex, this.regionCount - 1)];
+    // Track address range dynamically
+    this.minAddressSeen = Math.min(this.minAddressSeen, wrappedAddress);
+    this.maxAddressSeen = Math.max(this.maxAddressSeen, wrappedAddress);
+    
+    // Recalculate dynamic region size based on observed address range
+    const addressRange = this.maxAddressSeen - this.minAddressSeen + 1;
+    this.dynamicRegionSize = Math.max(1, Math.ceil(addressRange / this.regionCount));
+    
+    // Update region boundaries based on observed address range
+    for (let i = 0; i < this.regionCount; i++) {
+      this.regions[i].startAddress = this.minAddressSeen + i * this.dynamicRegionSize;
+      this.regions[i].endAddress = this.minAddressSeen + (i + 1) * this.dynamicRegionSize - 1;
+    }
+    
+    // Find region based on dynamic sizing
+    const regionIndex = Math.min(
+      Math.floor((wrappedAddress - this.minAddressSeen) / this.dynamicRegionSize),
+      this.regionCount - 1
+    );
+    const region = this.regions[Math.max(0, regionIndex)];
     
     // Update region stats
     region.accessCount++;
@@ -147,7 +171,7 @@ export class MainMemory {
       isWrite,
       latencyCycles: totalLatency,
       bytesTransferred: transferSize,
-      regionIndex,
+      regionIndex: Math.max(0, regionIndex),
     };
     
     this.accessHistory.push(result);
@@ -180,6 +204,10 @@ export class MainMemory {
 
   reset(): void {
     this.totalCycles = 0;
+    this.minAddressSeen = Infinity;
+    this.maxAddressSeen = 0;
+    this.dynamicRegionSize = 0;
+    
     this.stats = {
       totalReads: 0,
       totalWrites: 0,
@@ -192,6 +220,8 @@ export class MainMemory {
     };
     
     for (const region of this.regions) {
+      region.startAddress = 0;
+      region.endAddress = 0;
       region.accessCount = 0;
       region.readCount = 0;
       region.writeCount = 0;
