@@ -10,6 +10,12 @@ import {
   TraceEntry,
   AccessResult,
   OptimizationResult,
+  MemoryConfig,
+  MemoryStats,
+  MemoryRegion,
+  MemoryAccessResult,
+  HierarchyAccessResult,
+  defaultMemoryConfigs,
 } from '@/lib/cacheSimulator';
 
 export type PlaybackState = 'idle' | 'playing' | 'paused';
@@ -22,9 +28,33 @@ interface LastAccess extends AccessResult {
 interface MultiLevelLastAccess {
   l1?: LastAccess;
   l2?: LastAccess;
+  memoryResult?: MemoryAccessResult;
+  memoryAccessed?: boolean;
   address: number;
   isWrite: boolean;
+  totalLatency?: number;
+  dataPath?: ('L1' | 'L2' | 'Memory')[];
 }
+
+const defaultMemoryConfig: MemoryConfig = {
+  sizeMB: 256,
+  latencyCycles: 80,
+  busWidthBits: 64,
+  frequencyMHz: 3200,
+  memoryType: 'DDR4',
+  burstLength: 8,
+};
+
+const defaultMemoryStats: MemoryStats = {
+  totalReads: 0,
+  totalWrites: 0,
+  totalAccesses: 0,
+  bytesTransferred: 0,
+  averageLatency: 0,
+  bandwidthUtilization: 0,
+  peakBandwidthMBps: 0,
+  effectiveBandwidthMBps: 0,
+};
 
 interface SimulatorState {
   // Configuration
@@ -33,6 +63,12 @@ interface SimulatorState {
   setL1Config: (config: Partial<CacheConfig>) => void;
   setL2Config: (config: Partial<CacheConfig>) => void;
   toggleCacheLevel: (level: 'l1' | 'l2', enabled: boolean) => void;
+  
+  // Memory Configuration
+  memoryConfig: MemoryConfig;
+  setMemoryConfig: (config: Partial<MemoryConfig>) => void;
+  memoryStats: MemoryStats;
+  memoryRegions: MemoryRegion[];
   
   // Legacy single config for compatibility
   config: CacheConfig;
@@ -75,7 +111,7 @@ interface SimulatorState {
   setIsOptimizing: (isOptimizing: boolean) => void;
   
   // Saved configurations
-  savedConfigs: { name: string; config: MultiLevelCacheConfig }[];
+  savedConfigs: { name: string; config: MultiLevelCacheConfig; memoryConfig?: MemoryConfig }[];
   saveConfig: (name: string) => void;
   loadConfig: (name: string) => void;
   deleteConfig: (name: string) => void;
@@ -116,6 +152,9 @@ export const useSimulatorStore = create<SimulatorState>()(
     (set, get) => ({
       multiLevelConfig: defaultMultiLevelConfig,
       config: defaultL1Config,
+      memoryConfig: defaultMemoryConfig,
+      memoryStats: defaultMemoryStats,
+      memoryRegions: [],
       multiLevelSimulator: null,
       simulator: null,
       trace: [],
@@ -172,13 +211,21 @@ export const useSimulatorStore = create<SimulatorState>()(
         get().initSimulator();
       },
 
+      setMemoryConfig: (newConfig) => {
+        set((state) => ({
+          memoryConfig: { ...state.memoryConfig, ...newConfig },
+        }));
+        get().initSimulator();
+      },
+
       setConfig: (newConfig) => {
         get().setL1Config(newConfig);
       },
 
       initSimulator: () => {
         const config = get().multiLevelConfig;
-        const simulator = new MultiLevelCacheSimulator(config);
+        const memConfig = get().memoryConfig;
+        const simulator = new MultiLevelCacheSimulator(config, memConfig);
         
         const l1 = simulator.getL1();
         const l2 = simulator.getL2();
@@ -193,6 +240,8 @@ export const useSimulatorStore = create<SimulatorState>()(
           l2Stats: l2?.getStats() ?? defaultStats,
           combinedStats: simulator.getCombinedStats(),
           stats: l1?.getStats() ?? defaultStats,
+          memoryStats: simulator.getMemoryStats(),
+          memoryRegions: simulator.getMemoryRegions(),
           traceIndex: 0,
           lastAccess: null,
           playbackState: 'idle',
@@ -214,6 +263,8 @@ export const useSimulatorStore = create<SimulatorState>()(
             l2Stats: l2?.getStats() ?? defaultStats,
             combinedStats: simulator.getCombinedStats(),
             stats: l1?.getStats() ?? defaultStats,
+            memoryStats: simulator.getMemoryStats(),
+            memoryRegions: simulator.getMemoryRegions(),
             traceIndex: 0,
             lastAccess: null,
             playbackState: 'idle',
@@ -245,6 +296,10 @@ export const useSimulatorStore = create<SimulatorState>()(
         const lastAccess: MultiLevelLastAccess = {
           address: entry.address,
           isWrite: entry.isWrite,
+          totalLatency: result.totalLatency,
+          dataPath: result.dataPath,
+          memoryResult: result.memoryResult,
+          memoryAccessed: result.memoryResult !== undefined,
         };
         
         if (result.l1Result) {
@@ -271,6 +326,8 @@ export const useSimulatorStore = create<SimulatorState>()(
           l2Stats: l2?.getStats() ?? defaultStats,
           combinedStats: multiLevelSimulator.getCombinedStats(),
           stats: l1?.getStats() ?? defaultStats,
+          memoryStats: multiLevelSimulator.getMemoryStats(),
+          memoryRegions: multiLevelSimulator.getMemoryRegions(),
           traceIndex: traceIndex + 1,
           lastAccess,
         });
@@ -281,10 +338,11 @@ export const useSimulatorStore = create<SimulatorState>()(
 
       saveConfig: (name) => {
         const config = get().multiLevelConfig;
+        const memConfig = get().memoryConfig;
         set((state) => ({
           savedConfigs: [
             ...state.savedConfigs.filter((c) => c.name !== name),
-            { name, config },
+            { name, config, memoryConfig: memConfig },
           ],
         }));
       },
@@ -295,6 +353,7 @@ export const useSimulatorStore = create<SimulatorState>()(
           set({ 
             multiLevelConfig: saved.config,
             config: saved.config.l1,
+            memoryConfig: saved.memoryConfig ?? defaultMemoryConfig,
           });
           get().initSimulator();
         }
@@ -311,6 +370,7 @@ export const useSimulatorStore = create<SimulatorState>()(
       partialize: (state) => ({
         multiLevelConfig: state.multiLevelConfig,
         config: state.config,
+        memoryConfig: state.memoryConfig,
         savedConfigs: state.savedConfigs,
       }),
     }
