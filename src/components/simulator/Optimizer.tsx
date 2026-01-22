@@ -133,20 +133,6 @@ export function Optimizer({ embedded = false }: OptimizerProps) {
         </Button>
       </div>
 
-      {/* Mode Selector */}
-      <Tabs value={mode} onValueChange={(v) => setMode(v as OptimizationMode)} className="mb-6">
-        <TabsList className="grid w-full grid-cols-2 bg-muted/50">
-          <TabsTrigger value="single" className="flex items-center gap-2">
-            <Cpu size={14} />
-            Single Level (L1)
-          </TabsTrigger>
-          <TabsTrigger value="multi" className="flex items-center gap-2">
-            <Layers size={14} />
-            Multi-Level (L1+L2)
-          </TabsTrigger>
-        </TabsList>
-      </Tabs>
-
       <AnimatePresence mode="wait">
         {results.length > 0 && (
           <motion.div
