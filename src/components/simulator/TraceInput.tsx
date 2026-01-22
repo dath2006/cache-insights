@@ -5,6 +5,11 @@ import {
   generateRandomTrace,
   generateStridedTrace,
   generateTemporalLocalityTrace,
+  generateWorkingSetTrace,
+  generateThrashingTrace,
+  generateLRUKillerTrace,
+  generateZipfianTrace,
+  generateScanWithReuseTrace,
 } from '@/lib/cacheSimulator';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -20,13 +25,18 @@ import { Upload, Wand2, FileText, Eye } from 'lucide-react';
 import { useState, useCallback } from 'react';
 import { TraceViewer } from './TraceViewer';
 
-type PatternType = 'sequential' | 'random' | 'strided' | 'temporal';
+type PatternType = 'sequential' | 'random' | 'strided' | 'temporal' | 'workingset' | 'thrashing' | 'lrukiller' | 'zipfian' | 'scanreuse';
 
 const patternDescriptions: Record<PatternType, string> = {
   sequential: 'Array traversal - high spatial locality',
-  random: 'Hash table simulation - low locality',
+  random: 'Random access - minimal locality (1MB range)',
   strided: 'Matrix operations - regular stride pattern',
-  temporal: 'Hot/cold data - high temporal locality',
+  temporal: 'Hot/cold data - tests frequency-based policies',
+  workingset: 'Fixed working set - tests capacity limits',
+  thrashing: 'Cache thrashing - forces constant evictions',
+  lrukiller: 'LRU adversarial - exposes LRU weaknesses',
+  zipfian: 'Zipfian distribution - realistic web/DB access',
+  scanreuse: 'Scan with reuse - tests associativity benefits',
 };
 
 export function TraceInput() {
@@ -47,13 +57,28 @@ export function TraceInput() {
         newTrace = generateSequentialTrace(baseAddress, traceSize, 4);
         break;
       case 'random':
-        newTrace = generateRandomTrace(baseAddress, 0x10000, traceSize);
+        newTrace = generateRandomTrace(baseAddress, 0x100000, traceSize);
         break;
       case 'strided':
-        newTrace = generateStridedTrace(baseAddress, traceSize, 64);
+        newTrace = generateStridedTrace(baseAddress, traceSize, 256); // Larger stride
         break;
       case 'temporal':
-        newTrace = generateTemporalLocalityTrace(baseAddress, 10, 100, Math.floor(traceSize / 150));
+        newTrace = generateTemporalLocalityTrace(baseAddress, 50, 500, Math.max(1, Math.floor(traceSize / 500)));
+        break;
+      case 'workingset':
+        newTrace = generateWorkingSetTrace(baseAddress, 32, traceSize); // 32KB working set
+        break;
+      case 'thrashing':
+        newTrace = generateThrashingTrace(baseAddress, 8, traceSize); // Thrash an 8KB cache
+        break;
+      case 'lrukiller':
+        newTrace = generateLRUKillerTrace(baseAddress, 4, traceSize); // 4-way associativity killer
+        break;
+      case 'zipfian':
+        newTrace = generateZipfianTrace(baseAddress, 1000, traceSize, 1.2); // 1000 items, skew 1.2
+        break;
+      case 'scanreuse':
+        newTrace = generateScanWithReuseTrace(baseAddress, 256, 32, traceSize); // 256 elements, reuse distance 32
         break;
       default:
         newTrace = generateSequentialTrace(baseAddress, traceSize, 4);
@@ -175,9 +200,14 @@ export function TraceInput() {
             </SelectTrigger>
             <SelectContent>
               <SelectItem value="sequential">Sequential</SelectItem>
-              <SelectItem value="random">Random</SelectItem>
+              <SelectItem value="random">Random (Large Range)</SelectItem>
               <SelectItem value="strided">Strided</SelectItem>
               <SelectItem value="temporal">Temporal Locality</SelectItem>
+              <SelectItem value="workingset">Working Set Scan</SelectItem>
+              <SelectItem value="thrashing">Cache Thrashing</SelectItem>
+              <SelectItem value="lrukiller">LRU Killer</SelectItem>
+              <SelectItem value="zipfian">Zipfian Distribution</SelectItem>
+              <SelectItem value="scanreuse">Scan with Reuse</SelectItem>
             </SelectContent>
           </Select>
           <p className="text-xs text-muted-foreground">{patternDescriptions[pattern]}</p>

@@ -464,7 +464,7 @@ export function generateSequentialTrace(startAddress: number, count: number, str
   const entries: TraceEntry[] = [];
   for (let i = 0; i < count; i++) {
     entries.push({
-      isWrite: i % 4 === 0, // Mix of reads and writes
+      isWrite: i % 4 === 0,
       address: startAddress + (i * stride),
     });
   }
@@ -473,10 +473,12 @@ export function generateSequentialTrace(startAddress: number, count: number, str
 
 export function generateRandomTrace(baseAddress: number, range: number, count: number): TraceEntry[] {
   const entries: TraceEntry[] = [];
+  // Use a much larger address range to ensure cache pressure
+  const actualRange = Math.max(range, 0x100000); // At least 1MB range
   for (let i = 0; i < count; i++) {
     entries.push({
       isWrite: Math.random() > 0.7,
-      address: baseAddress + Math.floor(Math.random() * range),
+      address: baseAddress + Math.floor(Math.random() * actualRange),
     });
   }
   return entries;
@@ -495,22 +497,151 @@ export function generateStridedTrace(startAddress: number, count: number, stride
 
 export function generateTemporalLocalityTrace(baseAddress: number, hotCount: number, coldCount: number, iterations: number): TraceEntry[] {
   const entries: TraceEntry[] = [];
-  const hotAddresses = Array.from({ length: hotCount }, (_, i) => baseAddress + i * 4);
-  const coldAddresses = Array.from({ length: coldCount }, (_, i) => baseAddress + 0x10000 + i * 4);
+  // Increase working set sizes to stress cache
+  const actualHotCount = Math.max(hotCount, 50); // More hot addresses
+  const actualColdCount = Math.max(coldCount, 500); // More cold addresses
+  const hotAddresses = Array.from({ length: actualHotCount }, (_, i) => baseAddress + i * 64);
+  const coldAddresses = Array.from({ length: actualColdCount }, (_, i) => baseAddress + 0x100000 + i * 64);
   
   for (let iter = 0; iter < iterations; iter++) {
-    // Access hot addresses multiple times
-    for (let rep = 0; rep < 5; rep++) {
-      for (const addr of hotAddresses) {
-        entries.push({ isWrite: false, address: addr });
+    // Access hot addresses with varying frequency (creates LFU differentiation)
+    for (let rep = 0; rep < 3; rep++) {
+      for (let j = 0; j < hotAddresses.length; j++) {
+        // Higher index = more frequent access (LFU will prefer these)
+        const repeatCount = 1 + Math.floor(j / 10);
+        for (let r = 0; r < repeatCount; r++) {
+          entries.push({ isWrite: false, address: hotAddresses[j] });
+        }
       }
     }
-    // Occasionally access cold addresses
+    // Cold addresses cause evictions
     for (const addr of coldAddresses) {
       entries.push({ isWrite: false, address: addr });
     }
   }
   
+  return entries;
+}
+
+// NEW: Working Set Scan - cycles through a working set, stressing capacity
+export function generateWorkingSetTrace(baseAddress: number, workingSetKB: number, count: number): TraceEntry[] {
+  const entries: TraceEntry[] = [];
+  const workingSetSize = workingSetKB * 1024;
+  const blockSize = 64; // Assume typical block size
+  const numBlocks = Math.floor(workingSetSize / blockSize);
+  
+  for (let i = 0; i < count; i++) {
+    const blockIndex = i % numBlocks;
+    entries.push({
+      isWrite: i % 8 === 0,
+      address: baseAddress + blockIndex * blockSize,
+    });
+  }
+  return entries;
+}
+
+// NEW: Thrashing pattern - deliberately causes cache thrashing
+export function generateThrashingTrace(baseAddress: number, cacheKB: number, count: number): TraceEntry[] {
+  const entries: TraceEntry[] = [];
+  // Access pattern larger than cache to force constant evictions
+  const thrashSize = cacheKB * 1024 * 2; // 2x cache size
+  const blockSize = 64;
+  const numBlocks = Math.floor(thrashSize / blockSize);
+  
+  for (let i = 0; i < count; i++) {
+    // Cycle through addresses that exceed cache capacity
+    const blockIndex = i % numBlocks;
+    entries.push({
+      isWrite: false,
+      address: baseAddress + blockIndex * blockSize,
+    });
+  }
+  return entries;
+}
+
+// NEW: LRU killer - specifically designed to show LRU weaknesses
+export function generateLRUKillerTrace(baseAddress: number, setCount: number, count: number): TraceEntry[] {
+  const entries: TraceEntry[] = [];
+  const blockSize = 64;
+  
+  // This pattern accesses N+1 addresses that all map to the same set
+  // where N is the associativity. LRU will thrash, but other policies might not.
+  for (let i = 0; i < count; i++) {
+    // Create addresses that map to same cache set (stride by large power of 2)
+    const setStride = 4096; // Addresses setStride apart often map to same set
+    const blockInSet = i % (setCount + 1);
+    entries.push({
+      isWrite: false,
+      address: baseAddress + blockInSet * setStride,
+    });
+  }
+  return entries;
+}
+
+// NEW: Zipfian distribution - models real-world access patterns
+export function generateZipfianTrace(baseAddress: number, numItems: number, count: number, skew: number = 1.0): TraceEntry[] {
+  const entries: TraceEntry[] = [];
+  const blockSize = 64;
+  
+  // Pre-compute Zipfian probabilities
+  const probs: number[] = [];
+  let sum = 0;
+  for (let i = 1; i <= numItems; i++) {
+    const p = 1.0 / Math.pow(i, skew);
+    probs.push(p);
+    sum += p;
+  }
+  // Normalize
+  for (let i = 0; i < probs.length; i++) {
+    probs[i] /= sum;
+  }
+  
+  // Create cumulative distribution
+  const cdf: number[] = [];
+  let cumulative = 0;
+  for (const p of probs) {
+    cumulative += p;
+    cdf.push(cumulative);
+  }
+  
+  // Generate trace using inverse CDF
+  for (let i = 0; i < count; i++) {
+    const r = Math.random();
+    let itemIndex = 0;
+    for (let j = 0; j < cdf.length; j++) {
+      if (r <= cdf[j]) {
+        itemIndex = j;
+        break;
+      }
+    }
+    entries.push({
+      isWrite: Math.random() > 0.8,
+      address: baseAddress + itemIndex * blockSize,
+    });
+  }
+  return entries;
+}
+
+// NEW: Scan with reuse - shows benefit of larger associativity
+export function generateScanWithReuseTrace(baseAddress: number, arraySize: number, reuseDistance: number, count: number): TraceEntry[] {
+  const entries: TraceEntry[] = [];
+  const blockSize = 64;
+  
+  for (let i = 0; i < count; i++) {
+    const phase = i % (arraySize + reuseDistance);
+    let address: number;
+    
+    if (phase < arraySize) {
+      // Forward scan
+      address = baseAddress + phase * blockSize;
+    } else {
+      // Reuse: access recently used data
+      const reuseIndex = arraySize - 1 - (phase - arraySize);
+      address = baseAddress + Math.max(0, reuseIndex) * blockSize;
+    }
+    
+    entries.push({ isWrite: false, address });
+  }
   return entries;
 }
 
