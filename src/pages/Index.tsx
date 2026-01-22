@@ -9,8 +9,30 @@ import { MemoryPanel } from '@/components/simulator/MemoryPanel';
 import { MemoryVisualizer } from '@/components/simulator/MemoryVisualizer';
 import { ConfigComparison } from '@/components/simulator/ConfigComparison';
 import { CollapsiblePanel } from '@/components/simulator/CollapsiblePanel';
-import { TraceInput } from '@/components/simulator/TraceInput';
-import { Cpu, Settings, FileText, Wand2 } from 'lucide-react';
+import { TraceViewer } from '@/components/simulator/TraceViewer';
+import { 
+  parseTraceFile, 
+  generateSequentialTrace, 
+  generateRandomTrace, 
+  generateStridedTrace, 
+  generateTemporalLocalityTrace, 
+  generateWorkingSetTrace, 
+  generateThrashingTrace, 
+  generateLRUKillerTrace, 
+  generateZipfianTrace, 
+  generateScanWithReuseTrace 
+} from '@/lib/cacheSimulator';
+import { Button } from '@/components/ui/button';
+import { Label } from '@/components/ui/label';
+import { Slider } from '@/components/ui/slider';
+import { 
+  Select, 
+  SelectContent, 
+  SelectItem, 
+  SelectTrigger, 
+  SelectValue 
+} from '@/components/ui/select';
+import { Cpu, Settings, FileText, Wand2, Upload, Eye } from 'lucide-react';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 
@@ -181,15 +203,6 @@ function TraceInputContent() {
   const [traceSize, setTraceSize] = useState(1000);
   const [isDragOver, setIsDragOver] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
-
-  // Dynamic imports to avoid circular dependencies
-  const { TraceViewer } = require('@/components/simulator/TraceViewer');
-  const { parseTraceFile, generateSequentialTrace, generateRandomTrace, generateStridedTrace, generateTemporalLocalityTrace, generateWorkingSetTrace, generateThrashingTrace, generateLRUKillerTrace, generateZipfianTrace, generateScanWithReuseTrace } = require('@/lib/cacheSimulator');
-  const { Button } = require('@/components/ui/button');
-  const { Label } = require('@/components/ui/label');
-  const { Slider } = require('@/components/ui/slider');
-  const { Select, SelectContent, SelectItem, SelectTrigger, SelectValue } = require('@/components/ui/select');
-  const { Upload, Wand2, Eye } = require('lucide-react');
 
   const patternDescriptions: Record<string, string> = {
     sequential: 'Array traversal - high spatial locality',
