@@ -2,63 +2,54 @@ import { useSimulatorStore } from '@/store/simulatorStore';
 import { motion, AnimatePresence } from 'framer-motion';
 import { Tooltip, TooltipContent, TooltipTrigger } from '@/components/ui/tooltip';
 import { cn } from '@/lib/utils';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { Badge } from '@/components/ui/badge';
+import { CacheSet } from '@/lib/cacheSimulator';
 
-export function CacheGrid() {
-  const cacheSets = useSimulatorStore((s) => s.cacheSets);
-  const lastAccess = useSimulatorStore((s) => s.lastAccess);
-  const config = useSimulatorStore((s) => s.config);
+interface CacheLevelGridProps {
+  sets: CacheSet[];
+  config: { blockSize: number; cacheSize: number; associativity: number };
+  lastAccess?: {
+    setIndex: number;
+    wayIndex: number;
+    hit: boolean;
+  } | null;
+  level: 'L1' | 'L2';
+}
 
-  if (cacheSets.length === 0) {
+function CacheLevelGrid({ sets, config, lastAccess, level }: CacheLevelGridProps) {
+  if (sets.length === 0) {
     return (
-      <div className="flex items-center justify-center h-full glass-card rounded-xl">
-        <p className="text-muted-foreground">Initialize simulator to view cache</p>
+      <div className="flex items-center justify-center h-[300px] text-muted-foreground">
+        {level} Cache disabled
       </div>
     );
   }
 
-  // Calculate grid dimensions
-  const numSets = cacheSets.length;
-  const associativity = cacheSets[0]?.blocks.length ?? 1;
+  const numSets = sets.length;
+  const associativity = sets[0]?.blocks.length ?? 1;
 
-  // Limit visible sets for large caches
   const maxVisibleSets = 32;
-  const visibleSets = cacheSets.slice(0, maxVisibleSets);
+  const visibleSets = sets.slice(0, maxVisibleSets);
   const hiddenSets = numSets - maxVisibleSets;
 
   return (
-    <div className="glass-card rounded-xl p-6 overflow-auto h-full">
+    <div className="space-y-4">
       {/* Header */}
-      <div className="flex items-center justify-between mb-4">
-        <h3 className="font-semibold text-lg">Cache Memory</h3>
+      <div className="flex items-center justify-between">
+        <div className="flex items-center gap-2">
+          <Badge variant={level === 'L1' ? 'default' : 'secondary'}>
+            {level}
+          </Badge>
+          <span className="text-sm text-muted-foreground">
+            {(config.cacheSize / 1024).toFixed(0)}KB
+          </span>
+        </div>
         <div className="flex items-center gap-4 text-sm text-muted-foreground">
           <span>{numSets} Sets</span>
           <span>×</span>
           <span>{associativity}-way</span>
           <span className="text-xs">({config.blockSize}B blocks)</span>
-        </div>
-      </div>
-
-      {/* Legend */}
-      <div className="flex items-center gap-4 mb-4 text-xs">
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded bg-muted border border-border" />
-          <span>Empty</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded bg-primary/30 border border-primary/50" />
-          <span>Valid</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded bg-secondary/30 border border-secondary/50" />
-          <span>Dirty</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded bg-success glow-success" />
-          <span>Hit</span>
-        </div>
-        <div className="flex items-center gap-2">
-          <div className="w-4 h-4 rounded bg-error glow-error" />
-          <span>Miss</span>
         </div>
       </div>
 
@@ -87,12 +78,10 @@ export function CacheGrid() {
                 transition={{ delay: setIdx * 0.01 }}
                 className="flex items-center gap-2"
               >
-                {/* Set label */}
                 <div className="w-14 text-right text-xs font-mono text-muted-foreground">
                   Set {setIdx}
                 </div>
 
-                {/* Blocks in this set */}
                 <div className="flex-1 flex gap-1">
                   {set.blocks.map((block, wayIdx) => {
                     const isLastAccessed =
@@ -144,6 +133,10 @@ export function CacheGrid() {
                                   </span>
                                 </p>
                                 <p>
+                                  <span className="text-muted-foreground">Access Count:</span>{' '}
+                                  <span className="font-mono">{block.accessCount}</span>
+                                </p>
+                                <p>
                                   <span className="text-muted-foreground">Status:</span>{' '}
                                   {block.dirty ? (
                                     <span className="text-secondary">Dirty</span>
@@ -172,15 +165,139 @@ export function CacheGrid() {
           )}
         </div>
       </div>
+    </div>
+  );
+}
+
+export function CacheGrid() {
+  const l1CacheSets = useSimulatorStore((s) => s.l1CacheSets);
+  const l2CacheSets = useSimulatorStore((s) => s.l2CacheSets);
+  const lastAccess = useSimulatorStore((s) => s.lastAccess);
+  const multiLevelConfig = useSimulatorStore((s) => s.multiLevelConfig);
+
+  const l1Enabled = multiLevelConfig.enabled.l1;
+  const l2Enabled = multiLevelConfig.enabled.l2;
+
+  if (!l1Enabled && !l2Enabled) {
+    return (
+      <div className="flex items-center justify-center h-full glass-card rounded-xl">
+        <p className="text-muted-foreground">Enable at least one cache level</p>
+      </div>
+    );
+  }
+
+  // Determine what to show in last access bar
+  const getLastAccessDisplay = () => {
+    if (!lastAccess) return null;
+    
+    const l1Hit = lastAccess.l1?.hit;
+    const l2Hit = lastAccess.l2?.hit;
+    
+    let resultText = 'MISS';
+    let resultClass = 'text-error';
+    let level = '';
+    
+    if (l1Hit) {
+      resultText = 'L1 HIT';
+      resultClass = 'text-success';
+      level = `Set ${lastAccess.l1?.setIndex}, Way ${lastAccess.l1?.wayIndex}`;
+    } else if (l2Hit) {
+      resultText = 'L2 HIT';
+      resultClass = 'text-primary';
+      level = `Set ${lastAccess.l2?.setIndex}, Way ${lastAccess.l2?.wayIndex}`;
+    } else if (lastAccess.l1 && !l1Hit) {
+      level = l2Enabled ? 'L1 miss → L2 miss' : `Set ${lastAccess.l1?.setIndex}, Way ${lastAccess.l1?.wayIndex}`;
+    }
+    
+    return { resultText, resultClass, level };
+  };
+
+  const accessDisplay = getLastAccessDisplay();
+
+  return (
+    <div className="glass-card rounded-xl p-6 overflow-auto h-full flex flex-col">
+      {/* Legend */}
+      <div className="flex items-center gap-4 mb-4 text-xs flex-wrap">
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded bg-muted border border-border" />
+          <span>Empty</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded bg-primary/30 border border-primary/50" />
+          <span>Valid</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded bg-secondary/30 border border-secondary/50" />
+          <span>Dirty</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded bg-success glow-success" />
+          <span>Hit</span>
+        </div>
+        <div className="flex items-center gap-2">
+          <div className="w-4 h-4 rounded bg-error glow-error" />
+          <span>Miss</span>
+        </div>
+      </div>
+
+      {/* Cache Tabs or Single View */}
+      {l1Enabled && l2Enabled ? (
+        <Tabs defaultValue="l1" className="flex-1">
+          <TabsList className="grid w-full grid-cols-2 mb-4">
+            <TabsTrigger value="l1" className="flex items-center gap-2">
+              <Badge variant="default" className="text-xs">L1</Badge>
+              <span className="text-xs text-muted-foreground">
+                {(multiLevelConfig.l1.cacheSize / 1024).toFixed(0)}KB
+              </span>
+            </TabsTrigger>
+            <TabsTrigger value="l2" className="flex items-center gap-2">
+              <Badge variant="secondary" className="text-xs">L2</Badge>
+              <span className="text-xs text-muted-foreground">
+                {(multiLevelConfig.l2.cacheSize / 1024).toFixed(0)}KB
+              </span>
+            </TabsTrigger>
+          </TabsList>
+          <TabsContent value="l1" className="flex-1">
+            <CacheLevelGrid
+              sets={l1CacheSets}
+              config={multiLevelConfig.l1}
+              lastAccess={lastAccess?.l1}
+              level="L1"
+            />
+          </TabsContent>
+          <TabsContent value="l2" className="flex-1">
+            <CacheLevelGrid
+              sets={l2CacheSets}
+              config={multiLevelConfig.l2}
+              lastAccess={lastAccess?.l2}
+              level="L2"
+            />
+          </TabsContent>
+        </Tabs>
+      ) : l1Enabled ? (
+        <CacheLevelGrid
+          sets={l1CacheSets}
+          config={multiLevelConfig.l1}
+          lastAccess={lastAccess?.l1}
+          level="L1"
+        />
+      ) : (
+        <CacheLevelGrid
+          sets={l2CacheSets}
+          config={multiLevelConfig.l2}
+          lastAccess={lastAccess?.l2}
+          level="L2"
+        />
+      )}
 
       {/* Last Access Info */}
-      {lastAccess && (
+      {lastAccess && accessDisplay && (
         <motion.div
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           className={cn(
             'mt-4 p-3 rounded-lg border',
-            lastAccess.hit
+            accessDisplay.resultText.includes('HIT')
               ? 'bg-success/10 border-success/30'
               : 'bg-error/10 border-error/30'
           )}
@@ -190,17 +307,10 @@ export function CacheGrid() {
               {lastAccess.isWrite ? 'W' : 'R'} 0x
               {lastAccess.address.toString(16).toUpperCase().padStart(8, '0')}
             </span>
-            <span
-              className={cn(
-                'font-bold',
-                lastAccess.hit ? 'text-success' : 'text-error'
-              )}
-            >
-              {lastAccess.hit ? 'HIT' : 'MISS'}
+            <span className={cn('font-bold', accessDisplay.resultClass)}>
+              {accessDisplay.resultText}
             </span>
-            <span className="text-muted-foreground">
-              Set {lastAccess.setIndex}, Way {lastAccess.wayIndex}
-            </span>
+            <span className="text-muted-foreground">{accessDisplay.level}</span>
           </div>
         </motion.div>
       )}
