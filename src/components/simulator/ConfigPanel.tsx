@@ -124,6 +124,7 @@ function CacheLevelConfig({ level, config, setConfig, enabled, onToggle }: Cache
                 <SelectItem value="LRU">LRU (Least Recently Used)</SelectItem>
                 <SelectItem value="FIFO">FIFO (First In First Out)</SelectItem>
                 <SelectItem value="LFU">LFU (Least Frequently Used)</SelectItem>
+                <SelectItem value="RANDOM">Random</SelectItem>
               </SelectContent>
             </Select>
           </div>
