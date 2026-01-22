@@ -11,7 +11,13 @@ import {
 } from '@/components/ui/select';
 import { Button } from '@/components/ui/button';
 import { Input } from '@/components/ui/input';
-import { Settings, Save, FolderOpen, Trash2 } from 'lucide-react';
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from '@/components/ui/tooltip';
+import { Settings, Save, FolderOpen, Trash2, Info } from 'lucide-react';
 import { useState } from 'react';
 
 export function ConfigPanel() {
@@ -125,20 +131,46 @@ export function ConfigPanel() {
 
       {/* Write Policy */}
       <div className="space-y-3">
-        <Label className="text-sm">Write Policy</Label>
+        <div className="flex items-center gap-2">
+          <Label className="text-sm">Write Policy</Label>
+          <TooltipProvider>
+            <Tooltip>
+              <TooltipTrigger asChild>
+                <Info size={14} className="text-muted-foreground cursor-help" />
+              </TooltipTrigger>
+              <TooltipContent className="max-w-xs p-3 text-sm" side="right">
+                <p className="font-semibold mb-2">Write Policy & Allocation:</p>
+                <p className="mb-2">
+                  <strong className="text-primary">Write-Back</strong> = Write-Allocate<br />
+                  <span className="text-muted-foreground text-xs">On miss: load block to cache, then write. Data written to main memory only on eviction.</span>
+                </p>
+                <p>
+                  <strong className="text-secondary">Write-Through</strong> = No-Write-Allocate<br />
+                  <span className="text-muted-foreground text-xs">On miss: write directly to main memory without loading to cache.</span>
+                </p>
+              </TooltipContent>
+            </Tooltip>
+          </TooltipProvider>
+        </div>
         <div className="flex items-center justify-between p-3 bg-muted rounded-lg">
-          <span className={config.writePolicy === 'write-through' ? 'text-muted-foreground' : 'text-primary font-semibold'}>
-            Write-Back
-          </span>
+          <div className="flex flex-col">
+            <span className={config.writePolicy === 'write-through' ? 'text-muted-foreground' : 'text-primary font-semibold'}>
+              Write-Back
+            </span>
+            <span className="text-[10px] text-muted-foreground">+ Write-Allocate</span>
+          </div>
           <Switch
             checked={config.writePolicy === 'write-through'}
             onCheckedChange={(checked) =>
               setConfig({ writePolicy: checked ? 'write-through' : 'write-back' })
             }
           />
-          <span className={config.writePolicy === 'write-through' ? 'text-secondary font-semibold' : 'text-muted-foreground'}>
-            Write-Through
-          </span>
+          <div className="flex flex-col items-end">
+            <span className={config.writePolicy === 'write-through' ? 'text-secondary font-semibold' : 'text-muted-foreground'}>
+              Write-Through
+            </span>
+            <span className="text-[10px] text-muted-foreground">+ No-Write-Allocate</span>
+          </div>
         </div>
       </div>
 
