@@ -32,7 +32,8 @@ import {
   SelectTrigger, 
   SelectValue 
 } from '@/components/ui/select';
-import { Cpu, Settings, FileText, Wand2, Upload, Eye } from 'lucide-react';
+import { Cpu, Settings, FileText, Wand2, Upload, Eye, List } from 'lucide-react';
+import { FloatingTraceViewer } from '@/components/simulator/FloatingTraceViewer';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { cn } from '@/lib/utils';
 
@@ -45,6 +46,8 @@ const Index = () => {
   const [traceOpen, setTraceOpen] = useState(true);
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [optimizerOpen, setOptimizerOpen] = useState(true);
+  const [floatingTraceOpen, setFloatingTraceOpen] = useState(false);
+  const trace = useSimulatorStore((s) => s.trace);
 
   useEffect(() => {
     if (!simulator) {
@@ -88,8 +91,31 @@ const Index = () => {
             </p>
           </div>
         </div>
-        <StatsBar />
+        <div className="flex items-center gap-3">
+          <Button
+            variant={floatingTraceOpen ? "default" : "outline"}
+            size="sm"
+            onClick={() => setFloatingTraceOpen(!floatingTraceOpen)}
+            className="flex items-center gap-2"
+            disabled={trace.length === 0}
+          >
+            <List size={16} />
+            <span className="hidden sm:inline">Trace Viewer</span>
+            {trace.length > 0 && (
+              <span className="text-[10px] bg-background/20 px-1.5 py-0.5 rounded">
+                {trace.length}
+              </span>
+            )}
+          </Button>
+          <StatsBar />
+        </div>
       </header>
+
+      {/* Floating Trace Viewer */}
+      <FloatingTraceViewer 
+        open={floatingTraceOpen} 
+        onClose={() => setFloatingTraceOpen(false)} 
+      />
 
       {/* Quick toggles for collapsed panels */}
       {(leftCollapsed || rightCollapsed) && (
