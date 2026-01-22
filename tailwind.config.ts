@@ -57,6 +57,14 @@ export default {
           border: "hsl(var(--sidebar-border))",
           ring: "hsl(var(--sidebar-ring))",
         },
+        success: {
+          DEFAULT: "hsl(var(--success))",
+          foreground: "hsl(var(--success-foreground))",
+        },
+        error: {
+          DEFAULT: "hsl(var(--error))",
+          foreground: "hsl(var(--error-foreground))",
+        },
       },
       borderRadius: {
         lg: "var(--radius)",
@@ -65,25 +73,33 @@ export default {
       },
       keyframes: {
         "accordion-down": {
-          from: {
-            height: "0",
-          },
-          to: {
-            height: "var(--radix-accordion-content-height)",
-          },
+          from: { height: "0" },
+          to: { height: "var(--radix-accordion-content-height)" },
         },
         "accordion-up": {
-          from: {
-            height: "var(--radix-accordion-content-height)",
-          },
-          to: {
-            height: "0",
-          },
+          from: { height: "var(--radix-accordion-content-height)" },
+          to: { height: "0" },
+        },
+        "cache-hit": {
+          "0%": { backgroundColor: "hsl(var(--success))", boxShadow: "0 0 20px hsl(var(--success))" },
+          "100%": { backgroundColor: "hsl(var(--muted))", boxShadow: "none" },
+        },
+        "cache-miss": {
+          "0%": { backgroundColor: "hsl(var(--error))", boxShadow: "0 0 20px hsl(var(--error))" },
+          "100%": { backgroundColor: "hsl(var(--muted))", boxShadow: "none" },
+        },
+        "block-fill": {
+          "0%": { transform: "scale(0.8)", opacity: "0" },
+          "50%": { transform: "scale(1.1)" },
+          "100%": { transform: "scale(1)", opacity: "1" },
         },
       },
       animation: {
         "accordion-down": "accordion-down 0.2s ease-out",
         "accordion-up": "accordion-up 0.2s ease-out",
+        "cache-hit": "cache-hit 0.5s ease-out",
+        "cache-miss": "cache-miss 0.5s ease-out",
+        "block-fill": "block-fill 0.3s ease-out",
       },
     },
   },
