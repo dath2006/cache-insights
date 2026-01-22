@@ -16,8 +16,9 @@ import {
   SelectTrigger,
   SelectValue,
 } from '@/components/ui/select';
-import { Upload, Wand2, FileText } from 'lucide-react';
+import { Upload, Wand2, FileText, Eye } from 'lucide-react';
 import { useState, useCallback } from 'react';
+import { TraceViewer } from './TraceViewer';
 
 type PatternType = 'sequential' | 'random' | 'strided' | 'temporal';
 
@@ -35,6 +36,7 @@ export function TraceInput() {
   const [pattern, setPattern] = useState<PatternType>('sequential');
   const [traceSize, setTraceSize] = useState(1000);
   const [isDragOver, setIsDragOver] = useState(false);
+  const [viewerOpen, setViewerOpen] = useState(false);
 
   const generateTrace = useCallback(() => {
     const baseAddress = 0x10000;
@@ -104,11 +106,24 @@ export function TraceInput() {
         </div>
         <h2 className="text-lg font-bold">Trace Input</h2>
         {trace.length > 0 && (
-          <span className="ml-auto text-sm text-muted-foreground">
-            {trace.length.toLocaleString()} entries loaded
-          </span>
+          <div className="ml-auto flex items-center gap-2">
+            <span className="text-sm text-muted-foreground">
+              {trace.length.toLocaleString()} entries
+            </span>
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => setViewerOpen(true)}
+              className="h-7 px-2 text-xs"
+            >
+              <Eye size={14} className="mr-1" />
+              View
+            </Button>
+          </div>
         )}
       </div>
+
+      <TraceViewer open={viewerOpen} onOpenChange={setViewerOpen} />
 
       {/* File Upload */}
       <div
