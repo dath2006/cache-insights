@@ -127,19 +127,36 @@ export function PlaybackControls() {
         </div>
 
         {/* Speed control */}
-        <div className="flex items-center gap-3 min-w-[160px]">
+        <div className="flex items-center gap-3 min-w-[300px]">
           <FastForward size={14} className="text-muted-foreground" />
           <Slider
             value={[playbackSpeed]}
             min={1}
-            max={1000}
+            max={500}
             step={1}
             onValueChange={([v]) => setPlaybackSpeed(v)}
             className="flex-1"
           />
-          <span className="text-xs font-mono text-muted-foreground w-12">
+          <span className="text-xs font-mono text-primary min-w-[36px] text-right">
             {playbackSpeed}x
           </span>
+          <div className="flex items-center gap-1">
+            {[1, 10, 100, 500].map((speed) => (
+              <Button
+                key={speed}
+                size="sm"
+                variant={playbackSpeed === speed ? "default" : "outline"}
+                className={`h-6 px-2 text-[10px] font-mono ${
+                  playbackSpeed === speed 
+                    ? 'bg-primary text-primary-foreground' 
+                    : 'border-border hover:bg-muted'
+                }`}
+                onClick={() => setPlaybackSpeed(speed)}
+              >
+                {speed}x
+              </Button>
+            ))}
+          </div>
         </div>
       </div>
     </div>

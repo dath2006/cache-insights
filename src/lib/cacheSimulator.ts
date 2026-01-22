@@ -758,62 +758,386 @@ export function parseTraceFile(content: string): TraceEntry[] {
   return entries;
 }
 
-// Pattern generators
-export function generateSequentialTrace(startAddress: number, count: number, stride: number = 4): TraceEntry[] {
+// Pattern generators - Cache-Aware versions
+
+// Configuration interface for cache-aware trace generation
+export interface CacheAwareConfig {
+  l1CacheSize?: number;      // L1 cache size in bytes
+  l1BlockSize?: number;      // L1 block size in bytes
+  l1Associativity?: number;  // L1 associativity
+  l2CacheSize?: number;      // L2 cache size in bytes
+  l2BlockSize?: number;      // L2 block size in bytes
+  l2Associativity?: number;  // L2 associativity
+}
+
+// Stress level for trace generation - controls working set sizes
+export type StressLevel = 'light' | 'moderate' | 'heavy' | 'extreme';
+
+// User-controllable trace generation options
+export interface TraceGenerationOptions {
+  stressLevel: StressLevel;           // How aggressively to stress the cache
+  targetWorkingSetKB?: number;        // Override: absolute working set size
+  writeRatio?: number;                // 0.0 - 1.0 write percentage (default varies by pattern)
+  enableL2Pressure?: boolean;         // Whether to additionally stress L2
+}
+
+// Default trace generation options
+export const defaultTraceOptions: TraceGenerationOptions = {
+  stressLevel: 'moderate',
+  writeRatio: undefined, // Use pattern default
+  enableL2Pressure: false,
+};
+
+// Stress level multipliers relative to L1 cache size
+// Key insight: we calculate ABSOLUTE sizes that span cache configurations
+const stressMultipliers: Record<StressLevel, { 
+  workingSetMultiplier: number;  // Multiplier for L1 cache size
+  hotSetRatio: number;           // Hot set as ratio of working set
+  coldSetRatio: number;          // Cold set as ratio of working set
+  itemMultiplier: number;        // For Zipfian: items as multiple of cache blocks
+  description: string;
+}> = {
+  light: {
+    workingSetMultiplier: 0.5,   // 50% of L1 - fits comfortably
+    hotSetRatio: 0.7,
+    coldSetRatio: 0.3,
+    itemMultiplier: 2,
+    description: 'Fits in L1, high hit rates expected',
+  },
+  moderate: {
+    workingSetMultiplier: 1.5,   // 150% of L1 - causes some misses
+    hotSetRatio: 0.4,
+    coldSetRatio: 1.0,
+    itemMultiplier: 5,
+    description: 'Spills from L1, tests replacement policy',
+  },
+  heavy: {
+    workingSetMultiplier: 3.0,   // 300% of L1 - significant misses
+    hotSetRatio: 0.3,
+    coldSetRatio: 2.0,
+    itemMultiplier: 15,
+    description: 'Heavy L1 pressure, L2 becomes important',
+  },
+  extreme: {
+    workingSetMultiplier: 8.0,   // 800% of L1 - stresses entire hierarchy
+    hotSetRatio: 0.2,
+    coldSetRatio: 5.0,
+    itemMultiplier: 50,
+    description: 'Stresses entire cache hierarchy',
+  },
+};
+
+// Get stress-aware working set sizes
+export function getStressAwareSizes(
+  config: Required<CacheAwareConfig>,
+  options: TraceGenerationOptions = defaultTraceOptions
+): {
+  workingSetBytes: number;
+  hotSetBytes: number;
+  coldSetBytes: number;
+  numItems: number;
+  description: string;
+} {
+  const stress = stressMultipliers[options.stressLevel];
+  
+  // If user provided explicit target, use it
+  if (options.targetWorkingSetKB) {
+    const workingSetBytes = options.targetWorkingSetKB * 1024;
+    return {
+      workingSetBytes,
+      hotSetBytes: Math.floor(workingSetBytes * stress.hotSetRatio),
+      coldSetBytes: Math.floor(workingSetBytes * stress.coldSetRatio),
+      numItems: Math.floor(workingSetBytes / config.l1BlockSize * 2),
+      description: `Custom ${options.targetWorkingSetKB}KB working set`,
+    };
+  }
+  
+  // Calculate based on stress level and L1 size
+  const baseWorkingSet = config.l1CacheSize * stress.workingSetMultiplier;
+  
+  // Apply L2 pressure if enabled (use L2 as base instead)
+  const workingSetBytes = options.enableL2Pressure
+    ? config.l2CacheSize * stress.workingSetMultiplier * 0.5
+    : baseWorkingSet;
+  
+  const cacheBlocks = config.l1CacheSize / config.l1BlockSize;
+  
+  return {
+    workingSetBytes: Math.floor(workingSetBytes),
+    hotSetBytes: Math.floor(workingSetBytes * stress.hotSetRatio),
+    coldSetBytes: Math.floor(workingSetBytes * stress.coldSetRatio),
+    numItems: Math.floor(cacheBlocks * stress.itemMultiplier),
+    description: stress.description,
+  };
+}
+
+// Get stress level description for UI
+export function getStressLevelInfo(level: StressLevel): {
+  name: string;
+  description: string;
+  expectedHitRate: string;
+} {
+  switch (level) {
+    case 'light':
+      return {
+        name: 'Light',
+        description: 'Working set fits in L1 cache',
+        expectedHitRate: '90%+ hit rate',
+      };
+    case 'moderate':
+      return {
+        name: 'Moderate', 
+        description: 'Working set exceeds L1, tests replacement',
+        expectedHitRate: '60-85% hit rate',
+      };
+    case 'heavy':
+      return {
+        name: 'Heavy',
+        description: 'Significant L1 misses, L2 becomes critical',
+        expectedHitRate: '30-60% hit rate',
+      };
+    case 'extreme':
+      return {
+        name: 'Extreme',
+        description: 'Stresses entire cache hierarchy',
+        expectedHitRate: '<30% hit rate',
+      };
+  }
+}
+
+// Info about generated trace pattern
+export interface TraceGeneratorInfo {
+  name: string;
+  description: string;
+  whatItTests: string[];
+  expectedBehavior: string;
+  optimalFor: string[];
+  worstFor: string[];
+  stressInfo?: string; // Added: stress level context
+}
+
+// Default cache config if none provided
+const defaultCacheAwareConfig: Required<CacheAwareConfig> = {
+  l1CacheSize: 32 * 1024,    // 32KB L1
+  l1BlockSize: 64,           // 64B blocks
+  l1Associativity: 4,        // 4-way
+  l2CacheSize: 256 * 1024,   // 256KB L2
+  l2BlockSize: 64,
+  l2Associativity: 8,
+};
+
+function getEffectiveConfig(config?: CacheAwareConfig): Required<CacheAwareConfig> {
+  return {
+    ...defaultCacheAwareConfig,
+    ...config,
+  };
+}
+
+// SEQUENTIAL TRACE - Tests spatial locality
+export function generateSequentialTrace(
+  startAddress: number, 
+  count: number, 
+  stride: number = 4,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
+  
+  // Use block-aligned addresses for optimal cache utilization
+  const blockSize = config.l1BlockSize;
+  const alignedStart = Math.floor(startAddress / blockSize) * blockSize;
+  
+  // Stride covers working set based on stress level
+  const effectiveStride = Math.max(stride, blockSize / 4);
+  const writeRatio = options.writeRatio ?? 0.25;
+  
   for (let i = 0; i < count; i++) {
     entries.push({
-      isWrite: i % 4 === 0,
-      address: startAddress + (i * stride),
+      isWrite: Math.random() < writeRatio,
+      address: alignedStart + (i * effectiveStride),
     });
   }
   return entries;
 }
 
-export function generateRandomTrace(baseAddress: number, range: number, count: number): TraceEntry[] {
+export function getSequentialTraceInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
+  const blocksInL1 = config.l1CacheSize / config.l1BlockSize;
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  
+  return {
+    name: "Sequential Access",
+    description: `Linear memory traversal with stride-4 access. Block-aligned to ${config.l1BlockSize}B cache lines.`,
+    whatItTests: [
+      "Spatial locality exploitation",
+      "Cache block utilization efficiency",
+      "Prefetcher effectiveness (if enabled)",
+    ],
+    expectedBehavior: `Near 100% hit rate after initial compulsory misses. ${blocksInL1} blocks fill L1 before cycling.`,
+    optimalFor: ["All replacement policies", "All cache sizes"],
+    worstFor: ["None - this is the ideal access pattern"],
+    stressInfo: `${stressInfo.name}: ${stressInfo.description}`,
+  };
+}
+
+// RANDOM TRACE - Tests cache capacity under random access
+export function generateRandomTrace(
+  baseAddress: number, 
+  range: number, 
+  count: number,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
-  // Use a much larger address range to ensure cache pressure
-  const actualRange = Math.max(range, 0x100000); // At least 1MB range
+  
+  // Use stress-aware working set size for address range
+  const effectiveRange = options.targetWorkingSetKB 
+    ? options.targetWorkingSetKB * 1024 
+    : sizes.workingSetBytes;
+  const blockSize = config.l1BlockSize;
+  const writeRatio = options.writeRatio ?? 0.30;
+  
   for (let i = 0; i < count; i++) {
+    // Block-align random addresses
+    const randomOffset = Math.floor(Math.random() * (effectiveRange / blockSize)) * blockSize;
     entries.push({
-      isWrite: Math.random() > 0.7,
-      address: baseAddress + Math.floor(Math.random() * actualRange),
+      isWrite: Math.random() < writeRatio,
+      address: baseAddress + randomOffset,
     });
   }
   return entries;
 }
 
-export function generateStridedTrace(startAddress: number, count: number, stride: number): TraceEntry[] {
+export function getRandomTraceInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
+  const l1Blocks = config.l1CacheSize / config.l1BlockSize;
+  const rangeBlocks = sizes.workingSetBytes / config.l1BlockSize;
+  const expectedHitRate = Math.min(100, (l1Blocks / rangeBlocks * 100)).toFixed(1);
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  const rangeKB = (sizes.workingSetBytes / 1024).toFixed(0);
+  
+  return {
+    name: "Random Access",
+    description: `Uniformly random access across ${rangeKB}KB range. No temporal or spatial locality.`,
+    whatItTests: [
+      "Cache behavior under minimal locality",
+      "Associativity effectiveness for conflict handling",
+      "Replacement policy under random workload",
+    ],
+    expectedBehavior: `Expected ~${expectedHitRate}% hit rate. ${stressInfo.expectedHitRate}.`,
+    optimalFor: ["Larger caches", "Higher associativity"],
+    worstFor: ["Small caches", "Direct-mapped configurations"],
+    stressInfo: `${stressInfo.name}: ${rangeKB}KB working set (${stressInfo.description})`,
+  };
+}
+
+// STRIDED TRACE - Tests matrix-like access patterns
+export function generateStridedTrace(
+  startAddress: number, 
+  count: number, 
+  stride: number,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
+  const writeRatio = options.writeRatio ?? 0.0;
+  
+  // Use stride that causes conflicts based on stress level
+  // Light: stride = block size (sequential), Heavy: stride = set size (conflict)
+  const numSets = config.l1CacheSize / config.l1BlockSize / config.l1Associativity;
+  const setSize = numSets * config.l1BlockSize;
+  const stressMultiplier = options.stressLevel === 'light' ? 0.25 
+    : options.stressLevel === 'moderate' ? 0.5 
+    : options.stressLevel === 'heavy' ? 1.0 
+    : 2.0; // extreme
+  const effectiveStride = stride || Math.floor(setSize * stressMultiplier);
+  
   for (let i = 0; i < count; i++) {
     entries.push({
-      isWrite: false,
-      address: startAddress + (i * stride),
+      isWrite: Math.random() < writeRatio,
+      address: startAddress + (i * effectiveStride),
     });
   }
   return entries;
 }
 
-export function generateTemporalLocalityTrace(baseAddress: number, hotCount: number, coldCount: number, iterations: number): TraceEntry[] {
+export function getStridedTraceInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const numSets = config.l1CacheSize / config.l1BlockSize / config.l1Associativity;
+  const setSize = numSets * config.l1BlockSize;
+  const stressMultiplier = options.stressLevel === 'light' ? 0.25 
+    : options.stressLevel === 'moderate' ? 0.5 
+    : options.stressLevel === 'heavy' ? 1.0 
+    : 2.0;
+  const effectiveStride = Math.floor(setSize * stressMultiplier);
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  
+  return {
+    name: "Strided Access",
+    description: `Matrix column traversal. Stride = ${(effectiveStride / 1024).toFixed(1)}KB. Stresses set conflicts.`,
+    whatItTests: [
+      "Set-associative conflict handling",
+      "Matrix/2D array access patterns",
+      "Stride=set_size worst-case scenario",
+    ],
+    expectedBehavior: `${options.stressLevel === 'extreme' ? 'Very high miss rate' : 'Moderate conflicts'}. ${config.l1Associativity}-way limits concurrent strides.`,
+    optimalFor: ["Higher associativity caches"],
+    worstFor: ["Direct-mapped (1-way) caches", "Low associativity"],
+    stressInfo: `${stressInfo.name}: Stride ${(effectiveStride / 1024).toFixed(1)}KB (${stressInfo.description})`,
+  };
+}
+
+// TEMPORAL LOCALITY TRACE - Tests LRU/LFU differentiation
+export function generateTemporalLocalityTrace(
+  baseAddress: number, 
+  hotCount: number, 
+  coldCount: number, 
+  iterations: number,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
-  // Increase working set sizes to stress cache
-  const actualHotCount = Math.max(hotCount, 50); // More hot addresses
-  const actualColdCount = Math.max(coldCount, 500); // More cold addresses
-  const hotAddresses = Array.from({ length: actualHotCount }, (_, i) => baseAddress + i * 64);
-  const coldAddresses = Array.from({ length: actualColdCount }, (_, i) => baseAddress + 0x100000 + i * 64);
+  const blockSize = config.l1BlockSize;
+  
+  // Stress-aware hot and cold set sizes
+  // Hot set should fit in cache for light stress, exceed for heavy stress
+  const hotBlocks = Math.max(hotCount, Math.floor(sizes.hotSetBytes / blockSize));
+  const coldBlocks = Math.max(coldCount, Math.floor(sizes.coldSetBytes / blockSize));
+  
+  const hotAddresses = Array.from({ length: hotBlocks }, (_, i) => 
+    baseAddress + i * blockSize);
+  const coldAddresses = Array.from({ length: coldBlocks }, (_, i) => 
+    baseAddress + 0x100000 + i * blockSize);
   
   for (let iter = 0; iter < iterations; iter++) {
-    // Access hot addresses with varying frequency (creates LFU differentiation)
-    for (let rep = 0; rep < 3; rep++) {
-      for (let j = 0; j < hotAddresses.length; j++) {
-        // Higher index = more frequent access (LFU will prefer these)
-        const repeatCount = 1 + Math.floor(j / 10);
-        for (let r = 0; r < repeatCount; r++) {
-          entries.push({ isWrite: false, address: hotAddresses[j] });
-        }
+    // Access hot addresses with frequency gradient (LFU differentiator)
+    for (let j = 0; j < hotAddresses.length; j++) {
+      // More frequent accesses for lower indices (LFU will protect these)
+      const repeatCount = Math.max(1, 5 - Math.floor(j / Math.max(1, hotAddresses.length / 5)));
+      for (let r = 0; r < repeatCount; r++) {
+        entries.push({ isWrite: false, address: hotAddresses[j] });
       }
     }
-    // Cold addresses cause evictions
+    // Cold scan causes pressure - tests if hot data stays resident
     for (const addr of coldAddresses) {
       entries.push({ isWrite: false, address: addr });
     }
@@ -822,33 +1146,118 @@ export function generateTemporalLocalityTrace(baseAddress: number, hotCount: num
   return entries;
 }
 
-// NEW: Working Set Scan - cycles through a working set, stressing capacity
-export function generateWorkingSetTrace(baseAddress: number, workingSetKB: number, count: number): TraceEntry[] {
+export function getTemporalLocalityInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
+  const hotSizeKB = (sizes.hotSetBytes / 1024).toFixed(1);
+  const coldSizeKB = (sizes.coldSetBytes / 1024).toFixed(1);
+  const l1SizeKB = config.l1CacheSize / 1024;
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  const hotFitsL1 = sizes.hotSetBytes < config.l1CacheSize;
+  
+  return {
+    name: "Temporal Locality (Hot/Cold)",
+    description: `Hot set ${hotSizeKB}KB with ${coldSizeKB}KB cold scans. ${hotFitsL1 ? 'Hot fits in L1' : 'Hot exceeds L1'}.`,
+    whatItTests: [
+      "LRU vs LFU policy effectiveness",
+      "Working set retention under pressure",
+      "Frequency-based eviction decisions",
+    ],
+    expectedBehavior: hotFitsL1 
+      ? `High hit rate on hot data. LFU should protect frequently-accessed items.`
+      : `Hot set exceeds ${l1SizeKB}KB L1, expect significant misses. L2 becomes critical.`,
+    optimalFor: ["LFU replacement policy", "Larger cache sizes"],
+    worstFor: ["FIFO (no recency awareness)", `Caches smaller than ${hotSizeKB}KB`],
+    stressInfo: `${stressInfo.name}: Hot=${hotSizeKB}KB, Cold=${coldSizeKB}KB (${stressInfo.description})`,
+  };
+}
+
+// WORKING SET TRACE - Tests cache capacity boundaries
+export function generateWorkingSetTrace(
+  baseAddress: number, 
+  workingSetKB: number, 
+  count: number,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
-  const workingSetSize = workingSetKB * 1024;
-  const blockSize = 64; // Assume typical block size
-  const numBlocks = Math.floor(workingSetSize / blockSize);
+  
+  // Use stress-aware working set size
+  const effectiveWorkingSetBytes = options.targetWorkingSetKB 
+    ? options.targetWorkingSetKB * 1024 
+    : sizes.workingSetBytes;
+  const blockSize = config.l1BlockSize;
+  const numBlocks = Math.max(1, Math.floor(effectiveWorkingSetBytes / blockSize));
+  const writeRatio = options.writeRatio ?? 0.125;
   
   for (let i = 0; i < count; i++) {
     const blockIndex = i % numBlocks;
     entries.push({
-      isWrite: i % 8 === 0,
+      isWrite: Math.random() < writeRatio,
       address: baseAddress + blockIndex * blockSize,
     });
   }
   return entries;
 }
 
-// NEW: Thrashing pattern - deliberately causes cache thrashing
-export function generateThrashingTrace(baseAddress: number, cacheKB: number, count: number): TraceEntry[] {
+export function getWorkingSetInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
+  const workingSetKB = (sizes.workingSetBytes / 1024).toFixed(1);
+  const l1SizeKB = config.l1CacheSize / 1024;
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  const fitsL1 = sizes.workingSetBytes < config.l1CacheSize;
+  
+  return {
+    name: "Working Set Cycle",
+    description: `Cycles through ${workingSetKB}KB working set. ${fitsL1 ? 'Fits in L1' : 'Exceeds L1, spills to L2'}.`,
+    whatItTests: [
+      "Cache capacity utilization",
+      "Steady-state hit rate",
+      "Write-back behavior with periodic writes",
+    ],
+    expectedBehavior: fitsL1 
+      ? `High hit rate (~95%+) after warm-up since working set fits in ${l1SizeKB}KB L1.`
+      : `Moderate hit rate. Working set exceeds ${l1SizeKB}KB L1, L2 catches spills.`,
+    optimalFor: ["All replacement policies", "Write-back policy"],
+    worstFor: fitsL1 ? ["None when working set < cache size"] : [`Caches smaller than ${workingSetKB}KB`],
+    stressInfo: `${stressInfo.name}: ${workingSetKB}KB working set (${stressInfo.description})`,
+  };
+}
+
+// THRASHING TRACE - Deliberately causes cache thrashing
+export function generateThrashingTrace(
+  baseAddress: number, 
+  cacheKB: number, 
+  count: number,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
-  // Access pattern larger than cache to force constant evictions
-  const thrashSize = cacheKB * 1024 * 2; // 2x cache size
-  const blockSize = 64;
+  
+  // Thrashing size increases with stress level
+  // Always at least 1.2x L1 to guarantee thrashing
+  const minThrashMultiplier = 1.2;
+  const stressMultiplier = options.stressLevel === 'light' ? 1.3 
+    : options.stressLevel === 'moderate' ? 2.0 
+    : options.stressLevel === 'heavy' ? 4.0 
+    : 10.0; // extreme
+  const thrashSize = Math.floor(config.l1CacheSize * stressMultiplier);
+  const blockSize = config.l1BlockSize;
   const numBlocks = Math.floor(thrashSize / blockSize);
   
   for (let i = 0; i < count; i++) {
-    // Cycle through addresses that exceed cache capacity
+    // Sequential cycle through oversized working set
     const blockIndex = i % numBlocks;
     entries.push({
       isWrite: false,
@@ -858,34 +1267,137 @@ export function generateThrashingTrace(baseAddress: number, cacheKB: number, cou
   return entries;
 }
 
-// NEW: LRU killer - specifically designed to show LRU weaknesses
-export function generateLRUKillerTrace(baseAddress: number, setCount: number, count: number): TraceEntry[] {
-  const entries: TraceEntry[] = [];
-  const blockSize = 64;
+export function getThrashingInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const stressMultiplier = options.stressLevel === 'light' ? 1.3 
+    : options.stressLevel === 'moderate' ? 2.0 
+    : options.stressLevel === 'heavy' ? 4.0 
+    : 10.0;
+  const thrashSizeKB = Math.floor((config.l1CacheSize * stressMultiplier) / 1024);
+  const l1SizeKB = config.l1CacheSize / 1024;
+  const stressInfo = getStressLevelInfo(options.stressLevel);
   
-  // This pattern accesses N+1 addresses that all map to the same set
-  // where N is the associativity. LRU will thrash, but other policies might not.
+  return {
+    name: "Cache Thrashing",
+    description: `Cycles through ${thrashSizeKB}KB (${(stressMultiplier * 100).toFixed(0)}% of ${l1SizeKB}KB L1), forcing evictions.`,
+    whatItTests: [
+      "Behavior when working set exceeds capacity",
+      "Eviction storms and their impact",
+      "L2 cache effectiveness as victim cache",
+    ],
+    expectedBehavior: `Very low L1 hit rate. Data evicted before reuse. L2 critical for ${options.stressLevel === 'extreme' ? 'survival' : 'catching misses'}.`,
+    optimalFor: ["Larger L1 configurations", "L2 cache testing"],
+    worstFor: ["Small L1 caches", "Single-level hierarchies"],
+    stressInfo: `${stressInfo.name}: ${thrashSizeKB}KB thrash size (${stressInfo.description})`,
+  };
+}
+
+// LRU KILLER TRACE - Exploits LRU weakness
+// KEY INSIGHT: All addresses must map to the SAME set in ANY cache configuration
+// We use a stride >= largest tested cache (1MB) so addresses always collide
+export function generateLRUKillerTrace(
+  baseAddress: number, 
+  setCount: number, 
+  count: number,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const entries: TraceEntry[] = [];
+  const blockSize = config.l1BlockSize;
+  
+  // CRITICAL FIX: Use a stride larger than ANY cache we might test
+  // This ensures ALL addresses map to set 0 in any cache <= 1MB
+  const BIG_STRIDE = 1024 * 1024; // 1MB - larger than any L1/L2 we test
+  
+  // Target associativity based on stress level
+  const minTargetAssoc = options.stressLevel === 'light' ? 2 
+    : options.stressLevel === 'moderate' ? 4 
+    : options.stressLevel === 'heavy' ? 8 
+    : 16; // extreme: target 16-way caches
+  
+  const effectiveAssoc = Math.max(config.l1Associativity, minTargetAssoc);
+  
+  // Number of blocks = associativity + extra (guarantees evictions)
+  const extraBlocks = options.stressLevel === 'light' ? 1 
+    : options.stressLevel === 'moderate' ? 2 
+    : options.stressLevel === 'heavy' ? 4 
+    : effectiveAssoc; // extreme: double
+  
+  const blocksPerSet = effectiveAssoc + extraBlocks;
+  
+  // Generate addresses that ALL map to set 0 in any cache
   for (let i = 0; i < count; i++) {
-    // Create addresses that map to same cache set (stride by large power of 2)
-    const setStride = 4096; // Addresses setStride apart often map to same set
-    const blockInSet = i % (setCount + 1);
+    const blockInSet = i % blocksPerSet;
+    // Each block is BIG_STRIDE apart - they all map to same set
     entries.push({
       isWrite: false,
-      address: baseAddress + blockInSet * setStride,
+      address: baseAddress + blockInSet * BIG_STRIDE,
     });
   }
   return entries;
 }
 
-// NEW: Zipfian distribution - models real-world access patterns
-export function generateZipfianTrace(baseAddress: number, numItems: number, count: number, skew: number = 1.0): TraceEntry[] {
+export function getLRUKillerInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const ways = config.l1Associativity;
+  
+  // Match the generator's logic
+  const minTargetAssoc = options.stressLevel === 'light' ? 2 
+    : options.stressLevel === 'moderate' ? 4 
+    : options.stressLevel === 'heavy' ? 8 
+    : 16;
+  const effectiveAssoc = Math.max(ways, minTargetAssoc);
+  const extraBlocks = options.stressLevel === 'light' ? 1 
+    : options.stressLevel === 'moderate' ? 2 
+    : options.stressLevel === 'heavy' ? 4 
+    : effectiveAssoc;
+  const totalBlocks = effectiveAssoc + extraBlocks;
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  
+  return {
+    name: "LRU Killer Pattern",
+    description: `${totalBlocks} addresses cycle to stress up to ${effectiveAssoc}-way caches.`,
+    whatItTests: [
+      "LRU replacement policy weakness",
+      "Cyclic access patterns",
+      "Belady's anomaly-like behavior",
+    ],
+    expectedBehavior: `Caches with <${effectiveAssoc} ways will thrash. ${effectiveAssoc}+ way caches may partially survive.`,
+    optimalFor: ["RANDOM replacement", `>${effectiveAssoc}-way associativity`],
+    worstFor: ["LRU replacement", "FIFO replacement", `<=${effectiveAssoc}-way caches`],
+    stressInfo: `${stressInfo.name}: Targets up to ${effectiveAssoc}-way caches with ${totalBlocks} blocks (${stressInfo.description})`,
+  };
+}
+
+// ZIPFIAN TRACE - Realistic web/database access distribution
+export function generateZipfianTrace(
+  baseAddress: number, 
+  numItems: number, 
+  count: number, 
+  skew: number = 1.0,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
-  const blockSize = 64;
+  const blockSize = config.l1BlockSize;
+  const writeRatio = options.writeRatio ?? 0.20;
+  
+  // Number of unique items scales with stress level
+  const effectiveNumItems = numItems || sizes.numItems;
   
   // Pre-compute Zipfian probabilities
   const probs: number[] = [];
   let sum = 0;
-  for (let i = 1; i <= numItems; i++) {
+  for (let i = 1; i <= effectiveNumItems; i++) {
     const p = 1.0 / Math.pow(i, skew);
     probs.push(p);
     sum += p;
@@ -914,28 +1426,72 @@ export function generateZipfianTrace(baseAddress: number, numItems: number, coun
       }
     }
     entries.push({
-      isWrite: Math.random() > 0.8,
+      isWrite: Math.random() < writeRatio,
       address: baseAddress + itemIndex * blockSize,
     });
   }
   return entries;
 }
 
-// NEW: Scan with reuse - shows benefit of larger associativity
-export function generateScanWithReuseTrace(baseAddress: number, arraySize: number, reuseDistance: number, count: number): TraceEntry[] {
+export function getZipfianInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
+  const cacheBlocks = config.l1CacheSize / config.l1BlockSize;
+  const numItems = sizes.numItems;
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  const itemsToBlocksRatio = numItems / cacheBlocks;
+  
+  return {
+    name: "Zipfian Distribution",
+    description: `Power-law over ${numItems} items (${itemsToBlocksRatio.toFixed(1)}× L1 blocks). Top 20% get 80% accesses.`,
+    whatItTests: [
+      "Real-world access pattern simulation",
+      "Frequency-based caching effectiveness",
+      "Hot item retention",
+    ],
+    expectedBehavior: `Hit rate depends on stress. ${options.stressLevel === 'light' ? 'High' : options.stressLevel === 'extreme' ? 'Low' : 'Moderate'} hit rate expected.`,
+    optimalFor: ["LFU replacement", "LRU replacement", "Larger caches"],
+    worstFor: ["RANDOM replacement", "Very small caches"],
+    stressInfo: `${stressInfo.name}: ${numItems} items for ${cacheBlocks} L1 blocks (${stressInfo.description})`,
+  };
+}
+
+// SCAN WITH REUSE - Tests larger associativity benefits
+export function generateScanWithReuseTrace(
+  baseAddress: number, 
+  arraySize: number, 
+  reuseDistance: number, 
+  count: number,
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceEntry[] {
+  const config = getEffectiveConfig(cacheConfig);
+  const sizes = getStressAwareSizes(config, options);
   const entries: TraceEntry[] = [];
-  const blockSize = 64;
+  const blockSize = config.l1BlockSize;
+  
+  // Array size scales with stress level
+  const l1Blocks = config.l1CacheSize / blockSize;
+  const stressArrayMultiplier = options.stressLevel === 'light' ? 0.5 
+    : options.stressLevel === 'moderate' ? 1.0 
+    : options.stressLevel === 'heavy' ? 2.0 
+    : 4.0;
+  const effectiveArraySize = arraySize || Math.floor(l1Blocks * stressArrayMultiplier);
+  const effectiveReuseDistance = reuseDistance || Math.floor(effectiveArraySize * 0.25);
   
   for (let i = 0; i < count; i++) {
-    const phase = i % (arraySize + reuseDistance);
+    const phase = i % (effectiveArraySize + effectiveReuseDistance);
     let address: number;
     
-    if (phase < arraySize) {
+    if (phase < effectiveArraySize) {
       // Forward scan
       address = baseAddress + phase * blockSize;
     } else {
       // Reuse: access recently used data
-      const reuseIndex = arraySize - 1 - (phase - arraySize);
+      const reuseIndex = effectiveArraySize - 1 - (phase - effectiveArraySize);
       address = baseAddress + Math.max(0, reuseIndex) * blockSize;
     }
     
@@ -943,6 +1499,57 @@ export function generateScanWithReuseTrace(baseAddress: number, arraySize: numbe
   }
   return entries;
 }
+
+export function getScanWithReuseInfo(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): TraceGeneratorInfo {
+  const config = getEffectiveConfig(cacheConfig);
+  const l1Blocks = config.l1CacheSize / config.l1BlockSize;
+  const stressArrayMultiplier = options.stressLevel === 'light' ? 0.5 
+    : options.stressLevel === 'moderate' ? 1.0 
+    : options.stressLevel === 'heavy' ? 2.0 
+    : 4.0;
+  const arrayBlocks = Math.floor(l1Blocks * stressArrayMultiplier);
+  const arrayKB = (arrayBlocks * config.l1BlockSize / 1024).toFixed(1);
+  const stressInfo = getStressLevelInfo(options.stressLevel);
+  const fitsL1 = arrayBlocks < l1Blocks;
+  
+  return {
+    name: "Scan with Reuse",
+    description: `Scan ${arrayKB}KB array (${(stressArrayMultiplier * 100).toFixed(0)}% of L1), reuse last 25%. ${fitsL1 ? 'Fits in L1' : 'Exceeds L1'}.`,
+    whatItTests: [
+      "Forward scan followed by backward reuse",
+      "Recency-based policy effectiveness",
+      "Array algorithm simulation",
+    ],
+    expectedBehavior: fitsL1 
+      ? `LRU shows high reuse hit rate since scanned items stay cached.`
+      : `Array exceeds L1, expect reuse misses unless L2 catches spills.`,
+    optimalFor: ["LRU replacement", "Caches larger than scan size"],
+    worstFor: ["FIFO (no recency adaptation)", "Small caches"],
+    stressInfo: `${stressInfo.name}: ${arrayKB}KB scan size (${stressInfo.description})`,
+  };
+}
+
+// Get all pattern infos for UI
+export function getAllPatternInfos(
+  cacheConfig?: CacheAwareConfig,
+  options: TraceGenerationOptions = defaultTraceOptions
+): Record<string, TraceGeneratorInfo> {
+  return {
+    sequential: getSequentialTraceInfo(cacheConfig, options),
+    random: getRandomTraceInfo(cacheConfig, options),
+    strided: getStridedTraceInfo(cacheConfig, options),
+    temporal: getTemporalLocalityInfo(cacheConfig, options),
+    workingset: getWorkingSetInfo(cacheConfig, options),
+    thrashing: getThrashingInfo(cacheConfig, options),
+    lrukiller: getLRUKillerInfo(cacheConfig, options),
+    zipfian: getZipfianInfo(cacheConfig, options),
+    scanreuse: getScanWithReuseInfo(cacheConfig, options),
+  };
+}
+
 
 // Sweet Spot Optimizer
 export interface OptimizationResult {

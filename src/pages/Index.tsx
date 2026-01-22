@@ -20,7 +20,13 @@ import {
   generateThrashingTrace, 
   generateLRUKillerTrace, 
   generateZipfianTrace, 
-  generateScanWithReuseTrace 
+  generateScanWithReuseTrace,
+  getAllPatternInfos,
+  CacheAwareConfig,
+  StressLevel,
+  TraceGenerationOptions,
+  defaultTraceOptions,
+  getStressLevelInfo
 } from '@/lib/cacheSimulator';
 import { Button } from '@/components/ui/button';
 import { Label } from '@/components/ui/label';
@@ -185,10 +191,7 @@ const Index = () => {
 
         {/* Main Content - Cache Grid & Controls */}
         <div className={cn('space-y-4 transition-all duration-300', getCenterColSpan())}>
-          <div className={cn(
-            'transition-all duration-300',
-            !optimizerOpen ? 'h-[650px]' : 'h-[500px]'
-          )}>
+          <div className="transition-all duration-300">
             <CacheGrid />
           </div>
           <PlaybackControls />
@@ -220,58 +223,74 @@ const Index = () => {
 function TraceInputContent() {
   const setTrace = useSimulatorStore((s) => s.setTrace);
   const trace = useSimulatorStore((s) => s.trace);
+  const multiLevelConfig = useSimulatorStore((s) => s.multiLevelConfig);
   
   const [pattern, setPattern] = useState<'sequential' | 'random' | 'strided' | 'temporal' | 'workingset' | 'thrashing' | 'lrukiller' | 'zipfian' | 'scanreuse'>('sequential');
   const [traceSize, setTraceSize] = useState(1000);
   const [isDragOver, setIsDragOver] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [showPatternDetails, setShowPatternDetails] = useState(false);
+  const [stressLevel, setStressLevel] = useState<StressLevel>('moderate');
+  const [showAdvanced, setShowAdvanced] = useState(false);
+  const [writeRatio, setWriteRatio] = useState<number | undefined>(undefined);
 
-  const patternDescriptions: Record<string, string> = {
-    sequential: 'Array traversal - high spatial locality',
-    random: 'Random access - minimal locality',
-    strided: 'Matrix operations - stride pattern',
-    temporal: 'Hot/cold data - frequency-based',
-    workingset: 'Fixed working set - capacity tests',
-    thrashing: 'Cache thrashing - eviction stress',
-    lrukiller: 'LRU adversarial pattern',
-    zipfian: 'Zipfian distribution - realistic',
-    scanreuse: 'Scan with reuse pattern',
-  };
+  // Get cache-aware config from current settings
+  const getCacheConfig = (): CacheAwareConfig => ({
+    l1CacheSize: multiLevelConfig.enabled.l1 ? multiLevelConfig.l1.cacheSize : undefined,
+    l1BlockSize: multiLevelConfig.enabled.l1 ? multiLevelConfig.l1.blockSize : undefined,
+    l1Associativity: multiLevelConfig.enabled.l1 ? multiLevelConfig.l1.associativity : undefined,
+    l2CacheSize: multiLevelConfig.enabled.l2 ? multiLevelConfig.l2.cacheSize : undefined,
+    l2BlockSize: multiLevelConfig.enabled.l2 ? multiLevelConfig.l2.blockSize : undefined,
+    l2Associativity: multiLevelConfig.enabled.l2 ? multiLevelConfig.l2.associativity : undefined,
+  });
+
+  // Get trace generation options based on stress level
+  const getTraceOptions = (): TraceGenerationOptions => ({
+    stressLevel,
+    writeRatio,
+  });
+
+  // Get pattern infos based on current config and stress level
+  const patternInfos = getAllPatternInfos(getCacheConfig(), getTraceOptions());
+  const currentPatternInfo = patternInfos[pattern];
+  const stressInfo = getStressLevelInfo(stressLevel);
 
   const generateTrace = () => {
     const baseAddress = 0x10000;
+    const cacheConfig = getCacheConfig();
+    const traceOptions = getTraceOptions();
     let newTrace;
 
     switch (pattern) {
       case 'sequential':
-        newTrace = generateSequentialTrace(baseAddress, traceSize, 4);
+        newTrace = generateSequentialTrace(baseAddress, traceSize, 4, cacheConfig, traceOptions);
         break;
       case 'random':
-        newTrace = generateRandomTrace(baseAddress, 0x100000, traceSize);
+        newTrace = generateRandomTrace(baseAddress, 0x100000, traceSize, cacheConfig, traceOptions);
         break;
       case 'strided':
-        newTrace = generateStridedTrace(baseAddress, traceSize, 256);
+        newTrace = generateStridedTrace(baseAddress, traceSize, 0, cacheConfig, traceOptions);
         break;
       case 'temporal':
-        newTrace = generateTemporalLocalityTrace(baseAddress, 50, 500, Math.max(1, Math.floor(traceSize / 500)));
+        newTrace = generateTemporalLocalityTrace(baseAddress, 0, 0, Math.max(1, Math.floor(traceSize / 500)), cacheConfig, traceOptions);
         break;
       case 'workingset':
-        newTrace = generateWorkingSetTrace(baseAddress, 32, traceSize);
+        newTrace = generateWorkingSetTrace(baseAddress, 0, traceSize, cacheConfig, traceOptions);
         break;
       case 'thrashing':
-        newTrace = generateThrashingTrace(baseAddress, 8, traceSize);
+        newTrace = generateThrashingTrace(baseAddress, 0, traceSize, cacheConfig, traceOptions);
         break;
       case 'lrukiller':
-        newTrace = generateLRUKillerTrace(baseAddress, 4, traceSize);
+        newTrace = generateLRUKillerTrace(baseAddress, 0, traceSize, cacheConfig, traceOptions);
         break;
       case 'zipfian':
-        newTrace = generateZipfianTrace(baseAddress, 1000, traceSize, 1.2);
+        newTrace = generateZipfianTrace(baseAddress, 0, traceSize, 1.2, cacheConfig, traceOptions);
         break;
       case 'scanreuse':
-        newTrace = generateScanWithReuseTrace(baseAddress, 256, 32, traceSize);
+        newTrace = generateScanWithReuseTrace(baseAddress, 0, 0, traceSize, cacheConfig, traceOptions);
         break;
       default:
-        newTrace = generateSequentialTrace(baseAddress, traceSize, 4);
+        newTrace = generateSequentialTrace(baseAddress, traceSize, 4, cacheConfig, traceOptions);
     }
 
     setTrace(newTrace);
@@ -375,7 +394,80 @@ function TraceInputContent() {
               <SelectItem value="scanreuse">Scan+Reuse</SelectItem>
             </SelectContent>
           </Select>
-          <p className="text-[9px] text-muted-foreground">{patternDescriptions[pattern]}</p>
+          
+          {/* Pattern Description */}
+          <p className="text-xs text-muted-foreground">{currentPatternInfo?.description}</p>
+          
+          {/* Stress Level Selector */}
+          <div className="space-y-1.5 mt-2">
+            <Label className="text-[10px]">Stress Level</Label>
+            <div className="flex gap-1">
+              {(['light', 'moderate', 'heavy', 'extreme'] as StressLevel[]).map((level) => (
+                <button
+                  key={level}
+                  onClick={() => setStressLevel(level)}
+                  className={cn(
+                    "flex-1 px-2 py-1 text-[10px] rounded border transition-colors capitalize",
+                    stressLevel === level
+                      ? "bg-primary text-primary-foreground border-primary"
+                      : "bg-muted/50 border-border hover:border-primary/50"
+                  )}
+                >
+                  {level}
+                </button>
+              ))}
+            </div>
+            <p className="text-[10px] text-muted-foreground mt-1">
+              {stressInfo.description} • {stressInfo.expectedHitRate}
+            </p>
+            {currentPatternInfo?.stressInfo && (
+              <p className="text-[10px] text-primary/80">{currentPatternInfo.stressInfo}</p>
+            )}
+          </div>
+          
+          {/* Toggle for more details */}
+          <button 
+            onClick={() => setShowPatternDetails(!showPatternDetails)}
+            className="text-xs text-primary hover:underline font-medium"
+          >
+            {showPatternDetails ? '− Hide details' : '+ Show what it tests'}
+          </button>
+          
+          {/* Detailed Pattern Info */}
+          {showPatternDetails && currentPatternInfo && (
+            <div className="mt-2 p-3 bg-muted/50 rounded-lg space-y-3 text-xs">
+              <div>
+                <span className="font-semibold text-foreground">Tests:</span>
+                <ul className="list-disc list-inside text-muted-foreground mt-1">
+                  {currentPatternInfo.whatItTests.map((test, i) => (
+                    <li key={i}>{test}</li>
+                  ))}
+                </ul>
+              </div>
+              <div>
+                <span className="font-semibold text-foreground">Expected:</span>
+                <p className="text-muted-foreground mt-1">{currentPatternInfo.expectedBehavior}</p>
+              </div>
+              <div className="grid grid-cols-2 gap-3">
+                <div>
+                  <span className="font-semibold text-success">Best for:</span>
+                  <ul className="text-muted-foreground mt-1">
+                    {currentPatternInfo.optimalFor.map((opt, i) => (
+                      <li key={i}>• {opt}</li>
+                    ))}
+                  </ul>
+                </div>
+                <div>
+                  <span className="font-semibold text-destructive">Worst for:</span>
+                  <ul className="text-muted-foreground mt-1">
+                    {currentPatternInfo.worstFor.map((w, i) => (
+                      <li key={i}>• {w}</li>
+                    ))}
+                  </ul>
+                </div>
+              </div>
+            </div>
+          )}
         </div>
 
         <div className="space-y-1">

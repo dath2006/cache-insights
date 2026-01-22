@@ -14,13 +14,13 @@ import { Wand2, Trophy, TrendingUp, Layers, Cpu } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import {
   ResponsiveContainer,
-  ScatterChart,
-  Scatter,
+  BarChart,
+  Bar,
   XAxis,
   YAxis,
-  ZAxis,
   Tooltip,
-  Cell,
+  CartesianGrid,
+  Legend,
 } from 'recharts';
 
 type OptimizationMode = 'single' | 'multi';
@@ -70,37 +70,46 @@ export function Optimizer({ embedded = false }: OptimizerProps) {
     toggleCacheLevel('l2', true);
   };
 
-  const getColor = (missRate: number) => {
-    if (missRate < 5) return 'hsl(142, 76%, 50%)';
-    if (missRate < 15) return 'hsl(187, 94%, 50%)';
-    if (missRate < 30) return 'hsl(271, 91%, 65%)';
-    return 'hsl(0, 84%, 60%)';
-  };
+  // Group single results by cache size for bar chart
+  const singleChartData = (() => {
+    const grouped = new Map<string, { name: string; [key: string]: number | string }>();
+    singleResults.forEach((r) => {
+      const sizeKey = `${r.config.cacheSize / 1024}KB`;
+      if (!grouped.has(sizeKey)) {
+        grouped.set(sizeKey, { name: sizeKey });
+      }
+      const entry = grouped.get(sizeKey)!;
+      const assocKey = `${r.config.associativity}-way`;
+      // Store hit rate (higher is better, easier to compare)
+      entry[assocKey] = Math.round(r.stats.hitRate * 100 * 100) / 100;
+    });
+    return Array.from(grouped.values()).sort((a, b) => 
+      parseInt(a.name) - parseInt(b.name)
+    );
+  })();
 
-  const singleChartData = singleResults.map((r) => ({
-    x: r.config.cacheSize / 1024,
-    y: r.config.associativity,
-    z: (1 - r.stats.hitRate) * 100,
-    missRate: ((1 - r.stats.hitRate) * 100).toFixed(2),
-    size: r.config.cacheSize,
-    assoc: r.config.associativity,
-    blockSize: r.config.blockSize,
-    policy: r.config.replacementPolicy,
-    score: r.score,
-  }));
+  // Get unique associativities for bar colors
+  const singleAssocs = [...new Set(singleResults.map(r => r.config.associativity))].sort((a, b) => a - b);
 
-  const multiChartData = multiResults.map((r) => ({
-    x: r.totalSize / 1024,
-    y: r.l1Config.associativity + r.l2Config.associativity,
-    z: (1 - r.combinedStats.hitRate) * 100,
-    missRate: ((1 - r.combinedStats.hitRate) * 100).toFixed(2),
-    l1Size: r.l1Config.cacheSize,
-    l2Size: r.l2Config.cacheSize,
-    l1Assoc: r.l1Config.associativity,
-    l2Assoc: r.l2Config.associativity,
-    policy: r.l1Config.replacementPolicy,
-    score: r.score,
-  }));
+  // Group multi results by total size for bar chart  
+  const multiChartData = (() => {
+    const grouped = new Map<string, { name: string; [key: string]: number | string }>();
+    multiResults.forEach((r) => {
+      const sizeKey = `${r.totalSize / 1024}KB`;
+      if (!grouped.has(sizeKey)) {
+        grouped.set(sizeKey, { name: sizeKey });
+      }
+      const entry = grouped.get(sizeKey)!;
+      const configKey = `L1:${r.l1Config.associativity}w`;
+      entry[configKey] = Math.round(r.combinedStats.hitRate * 100 * 100) / 100;
+    });
+    return Array.from(grouped.values()).sort((a, b) => 
+      parseInt(a.name) - parseInt(b.name)
+    );
+  })();
+
+  // Get unique L1 associativities for multi-level bars
+  const multiAssocs = [...new Set(multiResults.map(r => r.l1Config.associativity))].sort((a, b) => a - b);
 
   const results = mode === 'single' ? singleResults : multiResults;
   const chartData = mode === 'single' ? singleChartData : multiChartData;
@@ -279,86 +288,78 @@ export function Optimizer({ embedded = false }: OptimizerProps) {
               </div>
             )}
 
-            {/* Scatter Chart */}
+            {/* Bar Chart - Hit Rate by Cache Size */}
             <div className="h-64">
               <p className="text-sm text-muted-foreground mb-2">
-                Miss Rate by Configuration (bubble size = miss rate)
+                Hit Rate by Cache Size (grouped by associativity)
               </p>
               <ResponsiveContainer width="100%" height="100%">
-                <ScatterChart margin={{ top: 20, right: 20, bottom: 20, left: 20 }}>
-                  <XAxis
-                    type="number"
-                    dataKey="x"
-                    name={mode === 'single' ? 'Size (KB)' : 'Total Size (KB)'}
+                <BarChart 
+                  data={mode === 'single' ? singleChartData : multiChartData}
+                  margin={{ top: 10, right: 30, bottom: 20, left: 10 }}
+                >
+                  <CartesianGrid strokeDasharray="3 3" stroke="hsl(217, 33%, 25%)" />
+                  <XAxis 
+                    dataKey="name" 
                     tick={{ fill: 'hsl(215, 20%, 65%)', fontSize: 10 }}
                     axisLine={{ stroke: 'hsl(217, 33%, 25%)' }}
-                    tickLine={{ stroke: 'hsl(217, 33%, 25%)' }}
-                    label={{
-                      value: mode === 'single' ? 'Cache Size (KB)' : 'Total Cache Size (KB)',
-                      position: 'bottom',
-                      fill: 'hsl(215, 20%, 65%)',
-                      fontSize: 11,
-                    }}
                   />
-                  <YAxis
-                    type="number"
-                    dataKey="y"
-                    name="Associativity"
+                  <YAxis 
+                    domain={[0, 100]}
                     tick={{ fill: 'hsl(215, 20%, 65%)', fontSize: 10 }}
                     axisLine={{ stroke: 'hsl(217, 33%, 25%)' }}
-                    tickLine={{ stroke: 'hsl(217, 33%, 25%)' }}
                     label={{
-                      value: mode === 'single' ? 'Associativity' : 'Combined Associativity',
+                      value: 'Hit Rate (%)',
                       angle: -90,
-                      position: 'left',
+                      position: 'insideLeft',
                       fill: 'hsl(215, 20%, 65%)',
                       fontSize: 11,
                     }}
                   />
-                  <ZAxis type="number" dataKey="z" range={[50, 400]} />
                   <Tooltip
-                    content={({ active, payload }) => {
-                      if (active && payload && payload.length) {
-                        const data = payload[0].payload;
-                        return (
-                          <div className="bg-card border border-border rounded-lg p-3 text-sm">
-                            <p className="font-bold mb-1">Configuration</p>
-                            {mode === 'single' ? (
-                              <>
-                                <p>Size: {data.size / 1024}KB</p>
-                                <p>Associativity: {data.assoc}-way</p>
-                                <p>Block: {data.blockSize}B</p>
-                                <p>Policy: {data.policy}</p>
-                              </>
-                            ) : (
-                              <>
-                                <p>L1: {data.l1Size / 1024}KB, {data.l1Assoc}-way</p>
-                                <p>L2: {data.l2Size / 1024}KB, {data.l2Assoc}-way</p>
-                                <p>Policy: {data.policy}</p>
-                              </>
-                            )}
-                            <p className="mt-1 font-semibold">
-                              Miss Rate:{' '}
-                              <span style={{ color: getColor(parseFloat(data.missRate)) }}>
-                                {data.missRate}%
-                              </span>
-                            </p>
-                          </div>
-                        );
-                      }
-                      return null;
+                    contentStyle={{
+                      backgroundColor: 'hsl(224, 71%, 4%)',
+                      border: '1px solid hsl(217, 33%, 25%)',
+                      borderRadius: '8px',
                     }}
+                    formatter={(value: number, name: string) => [`${value}%`, name]}
+                    labelFormatter={(label) => `Cache Size: ${label}`}
                   />
-                  <Scatter data={chartData}>
-                    {chartData.map((entry, index) => (
-                      <Cell
-                        key={index}
-                        fill={getColor(parseFloat(entry.missRate))}
-                        fillOpacity={0.7}
+                  <Legend 
+                    wrapperStyle={{ fontSize: '10px' }}
+                  />
+                  {mode === 'single' ? (
+                    singleAssocs.map((assoc, idx) => (
+                      <Bar
+                        key={assoc}
+                        dataKey={`${assoc}-way`}
+                        name={`${assoc}-way`}
+                        fill={[
+                          'hsl(142, 76%, 50%)', // green
+                          'hsl(187, 94%, 50%)', // cyan
+                          'hsl(271, 91%, 65%)', // purple
+                          'hsl(45, 93%, 50%)',  // yellow
+                        ][idx % 4]}
+                        radius={[4, 4, 0, 0]}
                       />
-                    ))}
-                  </Scatter>
-                </ScatterChart>
+                    ))
+                  ) : (
+                    multiAssocs.map((assoc, idx) => (
+                      <Bar
+                        key={assoc}
+                        dataKey={`L1:${assoc}w`}
+                        name={`L1:${assoc}-way`}
+                        fill={[
+                          'hsl(142, 76%, 50%)',
+                          'hsl(187, 94%, 50%)',
+                          'hsl(271, 91%, 65%)',
+                          'hsl(45, 93%, 50%)',
+                        ][idx % 4]}
+                        radius={[4, 4, 0, 0]}
+                      />
+                    ))
+                  )}
+                </BarChart>
               </ResponsiveContainer>
             </div>
 
