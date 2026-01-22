@@ -25,7 +25,11 @@ import {
 
 type OptimizationMode = 'single' | 'multi';
 
-export function Optimizer() {
+interface OptimizerProps {
+  embedded?: boolean;
+}
+
+export function Optimizer({ embedded = false }: OptimizerProps) {
   const [mode, setMode] = useState<OptimizationMode>('multi');
   const trace = useSimulatorStore((s) => s.trace);
   const multiLevelConfig = useSimulatorStore((s) => s.multiLevelConfig);
@@ -103,37 +107,29 @@ export function Optimizer() {
   const bestSingleResult = singleResults[0];
   const bestMultiResult = multiResults[0];
 
-  return (
-    <div className="glass-card rounded-xl p-6">
-      <div className="flex items-center justify-between mb-6">
-        <div className="flex items-center gap-3">
-          <div className="p-2 rounded-lg bg-gradient-to-br from-secondary/20 to-primary/20">
-            <Wand2 className="text-primary" size={20} />
-          </div>
-          <div>
-            <h2 className="text-lg font-bold">Sweet Spot Optimizer</h2>
-            <p className="text-xs text-muted-foreground">
-              Find the optimal cache configuration for your workload
-            </p>
-          </div>
-        </div>
+  const content = (
+    <div className="space-y-4">
+      <div className="flex items-center justify-between mb-4">
+        <Tabs value={mode} onValueChange={(v) => setMode(v as OptimizationMode)} className="flex-1">
+          <TabsList className="grid w-full grid-cols-2 bg-muted/50 h-8">
+            <TabsTrigger value="single" className="flex items-center gap-1.5 text-xs h-7">
+              <Cpu size={12} />
+              Single (L1)
+            </TabsTrigger>
+            <TabsTrigger value="multi" className="flex items-center gap-1.5 text-xs h-7">
+              <Layers size={12} />
+              Multi (L1+L2)
+            </TabsTrigger>
+          </TabsList>
+        </Tabs>
 
         <Button
           onClick={handleOptimize}
           disabled={trace.length === 0 || isOptimizing}
-          className="bg-gradient-to-r from-secondary to-primary hover:opacity-90"
+          size="sm"
+          className="bg-gradient-to-r from-secondary to-primary hover:opacity-90 ml-3 h-8 text-xs"
         >
-          {isOptimizing ? (
-            <>
-              <span className="animate-spin mr-2">⚙️</span>
-              Optimizing...
-            </>
-          ) : (
-            <>
-              <Wand2 className="mr-2" size={16} />
-              Find Optimal Config
-            </>
-          )}
+          {isOptimizing ? 'Optimizing...' : 'Find Optimal'}
         </Button>
       </div>
 
@@ -494,15 +490,33 @@ export function Optimizer() {
       </AnimatePresence>
 
       {results.length === 0 && !isOptimizing && (
-        <div className="text-center py-8 text-muted-foreground">
-          <TrendingUp className="mx-auto mb-2 opacity-50" size={32} />
-          <p className="text-sm">
+        <div className="text-center py-4 text-muted-foreground">
+          <TrendingUp className="mx-auto mb-2 opacity-50" size={24} />
+          <p className="text-xs">
             {trace.length === 0
-              ? 'Load a trace file first to run optimization'
-              : `Click "Find Optimal Config" to analyze your workload for ${mode === 'single' ? 'single-level' : 'multi-level'} cache`}
+              ? 'Load a trace file first'
+              : 'Click "Find Optimal" to analyze'}
           </p>
         </div>
       )}
+    </div>
+  );
+
+  if (embedded) {
+    return content;
+  }
+
+  return (
+    <div className="glass-card rounded-xl p-6">
+      <div className="flex items-center justify-between mb-4">
+        <div className="flex items-center gap-3">
+          <div className="p-2 rounded-lg bg-gradient-to-br from-secondary/20 to-primary/20">
+            <Wand2 className="text-primary" size={20} />
+          </div>
+          <h2 className="text-lg font-bold">Sweet Spot Optimizer</h2>
+        </div>
+      </div>
+      {content}
     </div>
   );
 }
