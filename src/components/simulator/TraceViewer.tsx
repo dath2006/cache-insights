@@ -16,8 +16,13 @@ interface TraceViewerProps {
 
 export function TraceViewer({ open, onOpenChange }: TraceViewerProps) {
   const trace = useSimulatorStore((s) => s.trace);
-  const config = useSimulatorStore((s) => s.config);
+  const multiLevelConfig = useSimulatorStore((s) => s.multiLevelConfig);
   const traceIndex = useSimulatorStore((s) => s.traceIndex);
+
+  // Use L1 config if enabled, otherwise L2
+  const config = multiLevelConfig.enabled.l1 
+    ? multiLevelConfig.l1 
+    : multiLevelConfig.l2;
 
   // Calculate address components
   const offsetBits = Math.log2(config.blockSize);

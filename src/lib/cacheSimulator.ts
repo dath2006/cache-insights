@@ -1,6 +1,6 @@
 // Cache Simulation Engine for CacheLab-Pro
 
-export type ReplacementPolicy = 'LRU' | 'FIFO';
+export type ReplacementPolicy = 'LRU' | 'FIFO' | 'LFU';
 export type WritePolicy = 'write-back' | 'write-through';
 
 export interface CacheBlock {
@@ -9,6 +9,7 @@ export interface CacheBlock {
   tag: number;
   lastAccessTime: number;
   insertionTime: number;
+  accessCount: number; // For LFU
 }
 
 export interface CacheSet {
@@ -22,6 +23,7 @@ export interface AccessResult {
   tag: number;
   evicted: boolean;
   evictedTag?: number;
+  level?: 'L1' | 'L2'; // Which cache level was accessed
 }
 
 export interface CacheStats {
@@ -38,6 +40,12 @@ export interface CacheConfig {
   associativity: number; // n-way
   replacementPolicy: ReplacementPolicy;
   writePolicy: WritePolicy;
+}
+
+export interface MultiLevelCacheConfig {
+  l1: CacheConfig;
+  l2: CacheConfig;
+  enabled: { l1: boolean; l2: boolean };
 }
 
 export interface TraceEntry {
@@ -89,6 +97,7 @@ export class CacheSimulator {
           tag: 0,
           lastAccessTime: 0,
           insertionTime: 0,
+          accessCount: 0,
         });
       }
       this.sets.push({ blocks });
@@ -120,6 +129,7 @@ export class CacheSimulator {
         this.stats.hits++;
         this.stats.hitRate = this.stats.hits / this.stats.totalAccesses;
         block.lastAccessTime = this.accessTime;
+        block.accessCount++; // For LFU
         
         if (isWrite && this.config.writePolicy === 'write-back') {
           block.dirty = true;
@@ -153,6 +163,7 @@ export class CacheSimulator {
     block.tag = tag;
     block.lastAccessTime = this.accessTime;
     block.insertionTime = this.accessTime;
+    block.accessCount = 1; // Reset for LFU
     block.dirty = isWrite && this.config.writePolicy === 'write-back';
     
     return {
@@ -180,6 +191,19 @@ export class CacheSimulator {
       let minTime = Infinity;
       for (let i = 0; i < set.blocks.length; i++) {
         if (set.blocks[i].lastAccessTime < minTime) {
+          minTime = set.blocks[i].lastAccessTime;
+          victimIndex = i;
+        }
+      }
+    } else if (this.config.replacementPolicy === 'LFU') {
+      // LFU: Find block with lowest access count
+      let minCount = Infinity;
+      let minTime = Infinity;
+      for (let i = 0; i < set.blocks.length; i++) {
+        // Use access count, tie-break with LRU
+        if (set.blocks[i].accessCount < minCount ||
+            (set.blocks[i].accessCount === minCount && set.blocks[i].lastAccessTime < minTime)) {
+          minCount = set.blocks[i].accessCount;
           minTime = set.blocks[i].lastAccessTime;
           victimIndex = i;
         }
@@ -241,6 +265,7 @@ export class CacheSimulator {
         block.tag = 0;
         block.lastAccessTime = 0;
         block.insertionTime = 0;
+        block.accessCount = 0;
       }
     }
   }
@@ -249,6 +274,146 @@ export class CacheSimulator {
   calculateAMAT(hitTime: number = 1, missPenalty: number = 100): number {
     const missRate = 1 - this.stats.hitRate;
     return hitTime + (missRate * missPenalty);
+  }
+}
+
+// Multi-Level Cache Simulator (L1 + L2)
+export class MultiLevelCacheSimulator {
+  private l1: CacheSimulator | null = null;
+  private l2: CacheSimulator | null = null;
+  private config: MultiLevelCacheConfig;
+  private combinedStats: CacheStats;
+
+  constructor(config: MultiLevelCacheConfig) {
+    this.config = config;
+    
+    if (config.enabled.l1) {
+      this.l1 = new CacheSimulator(config.l1);
+    }
+    if (config.enabled.l2) {
+      this.l2 = new CacheSimulator(config.l2);
+    }
+    
+    this.combinedStats = {
+      hits: 0,
+      misses: 0,
+      hitRate: 0,
+      totalAccesses: 0,
+      writebacks: 0,
+    };
+  }
+
+  access(address: number, isWrite: boolean): { l1Result?: AccessResult; l2Result?: AccessResult } {
+    this.combinedStats.totalAccesses++;
+    
+    let l1Result: AccessResult | undefined;
+    let l2Result: AccessResult | undefined;
+    
+    // Try L1 first
+    if (this.l1) {
+      l1Result = this.l1.access(address, isWrite);
+      l1Result.level = 'L1';
+      
+      if (l1Result.hit) {
+        this.combinedStats.hits++;
+        this.combinedStats.hitRate = this.combinedStats.hits / this.combinedStats.totalAccesses;
+        return { l1Result };
+      }
+    }
+    
+    // L1 miss or disabled, try L2
+    if (this.l2) {
+      l2Result = this.l2.access(address, isWrite);
+      l2Result.level = 'L2';
+      
+      if (l2Result.hit) {
+        this.combinedStats.hits++;
+        this.combinedStats.hitRate = this.combinedStats.hits / this.combinedStats.totalAccesses;
+        return { l1Result, l2Result };
+      }
+    }
+    
+    // Both missed
+    this.combinedStats.misses++;
+    this.combinedStats.hitRate = this.combinedStats.hits / this.combinedStats.totalAccesses;
+    
+    return { l1Result, l2Result };
+  }
+
+  getL1(): CacheSimulator | null {
+    return this.l1;
+  }
+
+  getL2(): CacheSimulator | null {
+    return this.l2;
+  }
+
+  getL1Stats(): CacheStats | null {
+    return this.l1?.getStats() ?? null;
+  }
+
+  getL2Stats(): CacheStats | null {
+    return this.l2?.getStats() ?? null;
+  }
+
+  getCombinedStats(): CacheStats {
+    return { ...this.combinedStats };
+  }
+
+  getConfig(): MultiLevelCacheConfig {
+    return this.config;
+  }
+
+  getTotalCacheSize(): number {
+    let total = 0;
+    if (this.config.enabled.l1) total += this.config.l1.cacheSize;
+    if (this.config.enabled.l2) total += this.config.l2.cacheSize;
+    return total;
+  }
+
+  reset(): void {
+    this.l1?.reset();
+    this.l2?.reset();
+    this.combinedStats = {
+      hits: 0,
+      misses: 0,
+      hitRate: 0,
+      totalAccesses: 0,
+      writebacks: 0,
+    };
+  }
+
+  // Calculate combined AMAT for multi-level cache
+  calculateAMAT(
+    l1HitTime: number = 1,
+    l2HitTime: number = 10,
+    memoryPenalty: number = 100
+  ): number {
+    const l1Stats = this.l1?.getStats();
+    const l2Stats = this.l2?.getStats();
+    
+    if (!this.config.enabled.l1 && !this.config.enabled.l2) {
+      return memoryPenalty;
+    }
+    
+    if (!this.config.enabled.l2) {
+      // Only L1
+      const l1MissRate = l1Stats ? 1 - l1Stats.hitRate : 1;
+      return l1HitTime + l1MissRate * memoryPenalty;
+    }
+    
+    if (!this.config.enabled.l1) {
+      // Only L2
+      const l2MissRate = l2Stats ? 1 - l2Stats.hitRate : 1;
+      return l2HitTime + l2MissRate * memoryPenalty;
+    }
+    
+    // Both L1 and L2
+    const l1MissRate = l1Stats ? 1 - l1Stats.hitRate : 1;
+    const l2MissRate = l2Stats ? 1 - l2Stats.hitRate : 1;
+    
+    // AMAT = L1 hit time + L1 miss rate * (L2 hit time + L2 miss rate * Memory penalty)
+    return l1HitTime + l1MissRate * (l2HitTime + l2MissRate * memoryPenalty);
   }
 }
 
