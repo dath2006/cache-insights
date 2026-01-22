@@ -11,6 +11,7 @@ interface CollapsiblePanelProps {
   defaultOpen?: boolean;
   className?: string;
   headerClassName?: string;
+  headerAction?: ReactNode;
   onToggle?: (isOpen: boolean) => void;
 }
 
@@ -21,6 +22,7 @@ export function CollapsiblePanel({
   defaultOpen = true,
   className,
   headerClassName,
+  headerAction,
   onToggle,
 }: CollapsiblePanelProps) {
   const [isOpen, setIsOpen] = useState(defaultOpen);
@@ -33,28 +35,34 @@ export function CollapsiblePanel({
 
   return (
     <div className={cn('glass-card rounded-xl overflow-hidden', className)}>
-      <Button
-        variant="ghost"
-        onClick={handleToggle}
-        className={cn(
-          'w-full flex items-center justify-between p-4 hover:bg-muted/50 rounded-none h-auto',
-          headerClassName
-        )}
-      >
-        <div className="flex items-center gap-3">
+      <div className={cn(
+        'flex items-center justify-between p-4',
+        headerClassName
+      )}>
+        <Button
+          variant="ghost"
+          onClick={handleToggle}
+          className="flex items-center gap-3 p-0 h-auto hover:bg-transparent"
+        >
           {icon && (
             <div className="p-2 rounded-lg bg-primary/20">
               {icon}
             </div>
           )}
           <span className="font-bold text-base">{title}</span>
-        </div>
-        {isOpen ? (
-          <ChevronUp size={18} className="text-muted-foreground" />
-        ) : (
-          <ChevronDown size={18} className="text-muted-foreground" />
+          {isOpen ? (
+            <ChevronUp size={18} className="text-muted-foreground" />
+          ) : (
+            <ChevronDown size={18} className="text-muted-foreground" />
+          )}
+        </Button>
+        
+        {headerAction && (
+          <div onClick={(e) => e.stopPropagation()}>
+            {headerAction}
+          </div>
         )}
-      </Button>
+      </div>
 
       <AnimatePresence initial={false}>
         {isOpen && (

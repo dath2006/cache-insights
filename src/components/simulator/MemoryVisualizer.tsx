@@ -166,7 +166,7 @@ export function MemoryVisualizer({ defaultOpen = true, onToggle }: MemoryVisuali
                   </div>
                 </div>
                 
-                <div className="grid grid-cols-4 gap-1">
+                <div className="grid grid-cols-4 gap-1 mb-3">
                   {memoryRegions.map((region, idx) => (
                     <motion.div
                       key={idx}
@@ -186,33 +186,31 @@ export function MemoryVisualizer({ defaultOpen = true, onToggle }: MemoryVisuali
                     </motion.div>
                   ))}
                 </div>
-              </div>
 
-              {/* Stats Summary */}
-              {memoryStats.totalAccesses > 0 && (
-                <div className="pt-2 border-t border-border shrink-0">
+                {/* Stats Summary - Always visible below heat map */}
+                <div className="pt-2 border-t border-border">
                   <div className="grid grid-cols-3 gap-2 text-center">
                     <div>
                       <div className="text-[10px] text-muted-foreground">Accesses</div>
                       <div className="font-mono text-xs font-bold text-accent">
-                        {memoryStats.totalAccesses}
+                        {memoryStats.totalAccesses || 0}
                       </div>
                     </div>
                     <div>
                       <div className="text-[10px] text-muted-foreground">Transferred</div>
                       <div className="font-mono text-xs font-bold text-accent">
-                        {formatSize(memoryStats.bytesTransferred)}
+                        {memoryStats.bytesTransferred > 0 ? formatSize(memoryStats.bytesTransferred) : '0 B'}
                       </div>
                     </div>
                     <div>
-                      <div className="text-[10px] text-muted-foreground">Latency</div>
+                      <div className="text-[10px] text-muted-foreground">Avg Latency</div>
                       <div className="font-mono text-xs font-bold text-accent">
-                        {memoryStats.averageLatency.toFixed(1)}
+                        {memoryStats.averageLatency > 0 ? memoryStats.averageLatency.toFixed(1) : '0'} cyc
                       </div>
                     </div>
                   </div>
                 </div>
-              )}
+              </div>
             </div>
           </motion.div>
         )}

@@ -172,13 +172,9 @@ const Index = () => {
             icon={<Wand2 size={18} className="text-primary" />}
             defaultOpen={optimizerOpen}
             onToggle={setOptimizerOpen}
+            headerAction={<ConfigComparison />}
           >
-            <div className="flex gap-4 flex-wrap">
-              <div className="flex-1 min-w-[300px]">
-                <Optimizer />
-              </div>
-              <ConfigComparison />
-            </div>
+            <Optimizer />
           </CollapsiblePanel>
         </div>
 
