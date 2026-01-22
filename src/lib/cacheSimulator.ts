@@ -509,6 +509,17 @@ export interface OptimizationResult {
   score: number;
 }
 
+export interface MultiLevelOptimizationResult {
+  l1Config: CacheConfig;
+  l2Config: CacheConfig;
+  l1Stats: CacheStats;
+  l2Stats: CacheStats;
+  combinedStats: CacheStats;
+  amat: number;
+  score: number;
+  totalSize: number;
+}
+
 export function runOptimization(
   trace: TraceEntry[],
   sizesKB: number[] = [1, 2, 4, 8, 16, 32, 64],
@@ -547,6 +558,144 @@ export function runOptimization(
         const score = (1 / amat) * (1 / (1 + costFactor));
         
         results.push({ config, stats, amat, score });
+      }
+    }
+  }
+  
+  return results.sort((a, b) => b.score - a.score);
+}
+
+// Multi-Level Cache Optimization
+export function runMultiLevelOptimization(
+  trace: TraceEntry[],
+  l1SizesKB: number[] = [1, 2, 4, 8],
+  l2SizesKB: number[] = [16, 32, 64],
+  l1Associativities: number[] = [1, 2, 4],
+  l2Associativities: number[] = [4, 8],
+  l1BlockSizes: number[] = [32, 64],
+  l2BlockSizes: number[] = [64, 128],
+  replacementPolicies: ReplacementPolicy[] = ['LRU', 'LFU', 'FIFO']
+): MultiLevelOptimizationResult[] {
+  const results: MultiLevelOptimizationResult[] = [];
+  
+  for (const l1SizeKB of l1SizesKB) {
+    for (const l2SizeKB of l2SizesKB) {
+      // L2 should be larger than L1
+      if (l2SizeKB <= l1SizeKB) continue;
+      
+      for (const l1Assoc of l1Associativities) {
+        for (const l2Assoc of l2Associativities) {
+          for (const l1BlockSize of l1BlockSizes) {
+            for (const l2BlockSize of l2BlockSizes) {
+              for (const policy of replacementPolicies) {
+                const l1CacheSize = l1SizeKB * 1024;
+                const l2CacheSize = l2SizeKB * 1024;
+                
+                // Skip invalid configurations
+                if (l1CacheSize / l1BlockSize < l1Assoc) continue;
+                if (l2CacheSize / l2BlockSize < l2Assoc) continue;
+                
+                const l1Config: CacheConfig = {
+                  cacheSize: l1CacheSize,
+                  blockSize: l1BlockSize,
+                  associativity: l1Assoc,
+                  replacementPolicy: policy,
+                  writePolicy: 'write-back',
+                };
+                
+                const l2Config: CacheConfig = {
+                  cacheSize: l2CacheSize,
+                  blockSize: l2BlockSize,
+                  associativity: l2Assoc,
+                  replacementPolicy: policy,
+                  writePolicy: 'write-back',
+                };
+                
+                const multiConfig: MultiLevelCacheConfig = {
+                  l1: l1Config,
+                  l2: l2Config,
+                  enabled: { l1: true, l2: true },
+                };
+                
+                const sim = new MultiLevelCacheSimulator(multiConfig);
+                
+                for (const entry of trace) {
+                  sim.access(entry.address, entry.isWrite);
+                }
+                
+                const l1Stats = sim.getL1Stats()!;
+                const l2Stats = sim.getL2Stats()!;
+                const combinedStats = sim.getCombinedStats();
+                const amat = sim.calculateAMAT();
+                const totalSize = l1CacheSize + l2CacheSize;
+                
+                // Score: balance between AMAT and cost (size)
+                const costFactor = Math.log2(totalSize / 1024) * 0.05;
+                const score = (1 / amat) * (1 / (1 + costFactor));
+                
+                results.push({
+                  l1Config,
+                  l2Config,
+                  l1Stats,
+                  l2Stats,
+                  combinedStats,
+                  amat,
+                  score,
+                  totalSize,
+                });
+              }
+            }
+          }
+        }
+      }
+    }
+  }
+  
+  return results.sort((a, b) => b.score - a.score);
+}
+
+// Single Level Optimization with all replacement policies
+export function runSingleLevelOptimization(
+  trace: TraceEntry[],
+  sizesKB: number[] = [1, 2, 4, 8, 16, 32, 64],
+  associativities: number[] = [1, 2, 4, 8],
+  blockSizes: number[] = [16, 32, 64],
+  replacementPolicies: ReplacementPolicy[] = ['LRU', 'LFU', 'FIFO']
+): OptimizationResult[] {
+  const results: OptimizationResult[] = [];
+  
+  for (const sizeKB of sizesKB) {
+    for (const assoc of associativities) {
+      for (const blockSize of blockSizes) {
+        for (const policy of replacementPolicies) {
+          const cacheSize = sizeKB * 1024;
+          
+          // Skip invalid configurations
+          if (cacheSize / blockSize < assoc) continue;
+          
+          const config: CacheConfig = {
+            cacheSize,
+            blockSize,
+            associativity: assoc,
+            replacementPolicy: policy,
+            writePolicy: 'write-back',
+          };
+          
+          const sim = new CacheSimulator(config);
+          
+          for (const entry of trace) {
+            sim.access(entry.address, entry.isWrite);
+          }
+          
+          const stats = sim.getStats();
+          const amat = sim.calculateAMAT();
+          
+          // Score: lower is better (penalize size for cost)
+          const costFactor = Math.log2(sizeKB) * 0.1;
+          const score = (1 / amat) * (1 / (1 + costFactor));
+          
+          results.push({ config, stats, amat, score });
+        }
       }
     }
   }
