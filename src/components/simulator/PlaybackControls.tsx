@@ -22,15 +22,30 @@ export function PlaybackControls() {
 
   useEffect(() => {
     if (playbackState === 'playing' && !isComplete) {
-      // For high speeds, step multiple times per interval
-      const baseInterval = 16; // ~60fps
-      const stepsPerInterval = Math.max(1, Math.floor(playbackSpeed / 10));
+      // Speed scaling:
+      // 1x = 500ms interval (2 steps/sec) - slow for observation
+      // 10x = 50ms interval (20 steps/sec)
+      // 100x = 16ms interval with 2 steps (120 steps/sec)
+      // 1000x = 16ms interval with 16 steps (1000 steps/sec)
+      
+      let interval: number;
+      let stepsPerTick: number;
+      
+      if (playbackSpeed <= 30) {
+        // Low speeds: adjust interval, 1 step per tick
+        interval = Math.max(16, 500 / playbackSpeed);
+        stepsPerTick = 1;
+      } else {
+        // High speeds: fixed interval, multiple steps per tick
+        interval = 16; // ~60fps
+        stepsPerTick = Math.ceil(playbackSpeed / 60);
+      }
       
       intervalRef.current = window.setInterval(() => {
-        for (let i = 0; i < stepsPerInterval; i++) {
+        for (let i = 0; i < stepsPerTick; i++) {
           stepForward();
         }
-      }, baseInterval);
+      }, interval);
     } else {
       if (intervalRef.current) {
         clearInterval(intervalRef.current);
