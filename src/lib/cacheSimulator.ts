@@ -1,6 +1,6 @@
 // Cache Simulation Engine for CacheLab-Pro
 
-export type ReplacementPolicy = 'LRU' | 'FIFO' | 'LFU';
+export type ReplacementPolicy = 'LRU' | 'FIFO' | 'LFU' | 'RANDOM';
 export type WritePolicy = 'write-back' | 'write-through';
 
 export interface CacheBlock {
@@ -187,35 +187,48 @@ export class CacheSimulator {
     // All blocks valid, need to evict
     let victimIndex = 0;
     
-    if (this.config.replacementPolicy === 'LRU') {
-      let minTime = Infinity;
-      for (let i = 0; i < set.blocks.length; i++) {
-        if (set.blocks[i].lastAccessTime < minTime) {
-          minTime = set.blocks[i].lastAccessTime;
-          victimIndex = i;
+    switch (this.config.replacementPolicy) {
+      case 'LRU': {
+        let minTime = Infinity;
+        for (let i = 0; i < set.blocks.length; i++) {
+          if (set.blocks[i].lastAccessTime < minTime) {
+            minTime = set.blocks[i].lastAccessTime;
+            victimIndex = i;
+          }
         }
+        break;
       }
-    } else if (this.config.replacementPolicy === 'LFU') {
-      // LFU: Find block with lowest access count
-      let minCount = Infinity;
-      let minTime = Infinity;
-      for (let i = 0; i < set.blocks.length; i++) {
-        // Use access count, tie-break with LRU
-        if (set.blocks[i].accessCount < minCount ||
-            (set.blocks[i].accessCount === minCount && set.blocks[i].lastAccessTime < minTime)) {
-          minCount = set.blocks[i].accessCount;
-          minTime = set.blocks[i].lastAccessTime;
-          victimIndex = i;
+      case 'LFU': {
+        // LFU: Find block with lowest access count
+        let minCount = Infinity;
+        let minTime = Infinity;
+        for (let i = 0; i < set.blocks.length; i++) {
+          // Use access count, tie-break with LRU
+          if (set.blocks[i].accessCount < minCount ||
+              (set.blocks[i].accessCount === minCount && set.blocks[i].lastAccessTime < minTime)) {
+            minCount = set.blocks[i].accessCount;
+            minTime = set.blocks[i].lastAccessTime;
+            victimIndex = i;
+          }
         }
+        break;
       }
-    } else {
-      // FIFO
-      let minInsertTime = Infinity;
-      for (let i = 0; i < set.blocks.length; i++) {
-        if (set.blocks[i].insertionTime < minInsertTime) {
-          minInsertTime = set.blocks[i].insertionTime;
-          victimIndex = i;
+      case 'RANDOM': {
+        // Random: Select a random block to evict
+        victimIndex = Math.floor(Math.random() * set.blocks.length);
+        break;
+      }
+      case 'FIFO':
+      default: {
+        // FIFO
+        let minInsertTime = Infinity;
+        for (let i = 0; i < set.blocks.length; i++) {
+          if (set.blocks[i].insertionTime < minInsertTime) {
+            minInsertTime = set.blocks[i].insertionTime;
+            victimIndex = i;
+          }
         }
+        break;
       }
     }
     
@@ -574,7 +587,7 @@ export function runMultiLevelOptimization(
   l2Associativities: number[] = [4, 8],
   l1BlockSizes: number[] = [32, 64],
   l2BlockSizes: number[] = [64, 128],
-  replacementPolicies: ReplacementPolicy[] = ['LRU', 'LFU', 'FIFO']
+  replacementPolicies: ReplacementPolicy[] = ['LRU', 'LFU', 'FIFO', 'RANDOM']
 ): MultiLevelOptimizationResult[] {
   const results: MultiLevelOptimizationResult[] = [];
   
@@ -660,7 +673,7 @@ export function runSingleLevelOptimization(
   sizesKB: number[] = [1, 2, 4, 8, 16, 32, 64],
   associativities: number[] = [1, 2, 4, 8],
   blockSizes: number[] = [16, 32, 64],
-  replacementPolicies: ReplacementPolicy[] = ['LRU', 'LFU', 'FIFO']
+  replacementPolicies: ReplacementPolicy[] = ['LRU', 'LFU', 'FIFO', 'RANDOM']
 ): OptimizationResult[] {
   const results: OptimizationResult[] = [];
   
