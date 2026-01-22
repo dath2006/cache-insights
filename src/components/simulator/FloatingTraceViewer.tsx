@@ -49,15 +49,25 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
 
   // Auto-scroll to current trace index
   useEffect(() => {
-    if (scrollRef.current && traceIndex > 0) {
-      const rowHeight = 36; // approximate row height
-      const scrollTop = (traceIndex - 1) * rowHeight - size.height / 2 + rowHeight;
-      scrollRef.current.scrollTo({
-        top: Math.max(0, scrollTop),
-        behavior: 'smooth'
-      });
+    if (scrollRef.current && traceIndex > 0 && open) {
+      // Small delay to ensure DOM is rendered
+      const timeoutId = setTimeout(() => {
+        if (scrollRef.current) {
+          const rowHeight = 28; // actual row height
+          const headerHeight = 32; // sticky header
+          const targetRow = traceIndex - 1;
+          const containerHeight = scrollRef.current.clientHeight;
+          const scrollTop = targetRow * rowHeight - containerHeight / 2 + rowHeight / 2 + headerHeight;
+          
+          scrollRef.current.scrollTo({
+            top: Math.max(0, scrollTop),
+            behavior: 'smooth'
+          });
+        }
+      }, 50);
+      return () => clearTimeout(timeoutId);
     }
-  }, [traceIndex, size.height]);
+  }, [traceIndex, open]);
 
   // Dragging handlers
   const handleMouseDown = (e: React.MouseEvent) => {
