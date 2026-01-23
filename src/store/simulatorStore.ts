@@ -1,5 +1,5 @@
-import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { create } from "zustand";
+import { persist } from "zustand/middleware";
 import {
   CacheSimulator,
   MultiLevelCacheSimulator,
@@ -16,9 +16,13 @@ import {
   MemoryAccessResult,
   HierarchyAccessResult,
   defaultMemoryConfigs,
-} from '@/lib/cacheSimulator';
+} from "@/lib/cacheSimulator";
+import {
+  saveSimulationToHistory,
+  SimulationHistoryEntry,
+} from "@/lib/historyDB";
 
-export type PlaybackState = 'idle' | 'playing' | 'paused';
+export type PlaybackState = "idle" | "playing" | "paused";
 
 interface LastAccess extends AccessResult {
   address: number;
@@ -33,7 +37,7 @@ interface MultiLevelLastAccess {
   address: number;
   isWrite: boolean;
   totalLatency?: number;
-  dataPath?: ('L1' | 'L2' | 'Memory')[];
+  dataPath?: ("L1" | "L2" | "Memory")[];
 }
 
 const defaultMemoryConfig: MemoryConfig = {
@@ -41,7 +45,7 @@ const defaultMemoryConfig: MemoryConfig = {
   latencyCycles: 80,
   busWidthBits: 64,
   frequencyMHz: 3200,
-  memoryType: 'DDR4',
+  memoryType: "DDR4",
   burstLength: 8,
 };
 
@@ -62,23 +66,23 @@ interface SimulatorState {
   setMultiLevelConfig: (config: Partial<MultiLevelCacheConfig>) => void;
   setL1Config: (config: Partial<CacheConfig>) => void;
   setL2Config: (config: Partial<CacheConfig>) => void;
-  toggleCacheLevel: (level: 'l1' | 'l2', enabled: boolean) => void;
-  
+  toggleCacheLevel: (level: "l1" | "l2", enabled: boolean) => void;
+
   // Memory Configuration
   memoryConfig: MemoryConfig;
   setMemoryConfig: (config: Partial<MemoryConfig>) => void;
   memoryStats: MemoryStats;
   memoryRegions: MemoryRegion[];
-  
+
   // Legacy single config for compatibility
   config: CacheConfig;
   setConfig: (config: Partial<CacheConfig>) => void;
-  
+
   // Multi-level simulator
   multiLevelSimulator: MultiLevelCacheSimulator | null;
   initSimulator: () => void;
   resetSimulator: () => void;
-  
+
   // Cache state for visualization
   l1CacheSets: CacheSet[];
   l2CacheSets: CacheSet[];
@@ -86,51 +90,58 @@ interface SimulatorState {
   l2Stats: CacheStats;
   combinedStats: CacheStats;
   lastAccess: MultiLevelLastAccess | null;
-  
+
   // Legacy compatibility
   cacheSets: CacheSet[];
   stats: CacheStats;
   simulator: CacheSimulator | null;
-  
+
   // Trace data
   trace: TraceEntry[];
   traceIndex: number;
   setTrace: (trace: TraceEntry[]) => void;
-  
+
   // Playback controls
   playbackState: PlaybackState;
   playbackSpeed: number;
   setPlaybackState: (state: PlaybackState) => void;
   setPlaybackSpeed: (speed: number) => void;
   stepForward: () => void;
-  
+
   // Optimization
   optimizationResults: OptimizationResult[];
   isOptimizing: boolean;
   setOptimizationResults: (results: OptimizationResult[]) => void;
   setIsOptimizing: (isOptimizing: boolean) => void;
-  
+
   // Saved configurations
-  savedConfigs: { name: string; config: MultiLevelCacheConfig; memoryConfig?: MemoryConfig }[];
+  savedConfigs: {
+    name: string;
+    config: MultiLevelCacheConfig;
+    memoryConfig?: MemoryConfig;
+  }[];
   saveConfig: (name: string) => void;
   loadConfig: (name: string) => void;
   deleteConfig: (name: string) => void;
+
+  // History
+  saveToHistory: () => Promise<void>;
 }
 
 const defaultL1Config: CacheConfig = {
   cacheSize: 4096, // 4KB
   blockSize: 32,
   associativity: 4,
-  replacementPolicy: 'LRU',
-  writePolicy: 'write-back',
+  replacementPolicy: "LRU",
+  writePolicy: "write-back",
 };
 
 const defaultL2Config: CacheConfig = {
   cacheSize: 32768, // 32KB
   blockSize: 64,
   associativity: 8,
-  replacementPolicy: 'LRU',
-  writePolicy: 'write-back',
+  replacementPolicy: "LRU",
+  writePolicy: "write-back",
 };
 
 const defaultMultiLevelConfig: MultiLevelCacheConfig = {
@@ -167,7 +178,7 @@ export const useSimulatorStore = create<SimulatorState>()(
       cacheSets: [],
       stats: defaultStats,
       lastAccess: null,
-      playbackState: 'idle',
+      playbackState: "idle",
       playbackSpeed: 1,
       optimizationResults: [],
       isOptimizing: false,
@@ -226,10 +237,10 @@ export const useSimulatorStore = create<SimulatorState>()(
         const config = get().multiLevelConfig;
         const memConfig = get().memoryConfig;
         const simulator = new MultiLevelCacheSimulator(config, memConfig);
-        
+
         const l1 = simulator.getL1();
         const l2 = simulator.getL2();
-        
+
         set({
           multiLevelSimulator: simulator,
           simulator: l1,
@@ -244,7 +255,7 @@ export const useSimulatorStore = create<SimulatorState>()(
           memoryRegions: simulator.getMemoryRegions(),
           traceIndex: 0,
           lastAccess: null,
-          playbackState: 'idle',
+          playbackState: "idle",
         });
       },
 
@@ -254,7 +265,7 @@ export const useSimulatorStore = create<SimulatorState>()(
           simulator.reset();
           const l1 = simulator.getL1();
           const l2 = simulator.getL2();
-          
+
           set({
             l1CacheSets: l1?.getSets() ?? [],
             l2CacheSets: l2?.getSets() ?? [],
@@ -267,7 +278,7 @@ export const useSimulatorStore = create<SimulatorState>()(
             memoryRegions: simulator.getMemoryRegions(),
             traceIndex: 0,
             lastAccess: null,
-            playbackState: 'idle',
+            playbackState: "idle",
           });
         }
       },
@@ -283,13 +294,13 @@ export const useSimulatorStore = create<SimulatorState>()(
       stepForward: () => {
         const { multiLevelSimulator, trace, traceIndex } = get();
         if (!multiLevelSimulator || traceIndex >= trace.length) {
-          set({ playbackState: 'idle' });
+          set({ playbackState: "idle" });
           return;
         }
 
         const entry = trace[traceIndex];
         const result = multiLevelSimulator.access(entry.address, entry.isWrite);
-        
+
         const l1 = multiLevelSimulator.getL1();
         const l2 = multiLevelSimulator.getL2();
 
@@ -301,7 +312,7 @@ export const useSimulatorStore = create<SimulatorState>()(
           memoryResult: result.memoryResult,
           memoryAccessed: result.memoryResult !== undefined,
         };
-        
+
         if (result.l1Result) {
           lastAccess.l1 = {
             ...result.l1Result,
@@ -309,7 +320,7 @@ export const useSimulatorStore = create<SimulatorState>()(
             isWrite: entry.isWrite,
           };
         }
-        
+
         if (result.l2Result) {
           lastAccess.l2 = {
             ...result.l2Result,
@@ -317,6 +328,9 @@ export const useSimulatorStore = create<SimulatorState>()(
             isWrite: entry.isWrite,
           };
         }
+
+        const newIndex = traceIndex + 1;
+        const isComplete = newIndex >= trace.length;
 
         set({
           l1CacheSets: l1?.getSets() ?? [],
@@ -328,12 +342,16 @@ export const useSimulatorStore = create<SimulatorState>()(
           stats: l1?.getStats() ?? defaultStats,
           memoryStats: multiLevelSimulator.getMemoryStats(),
           memoryRegions: multiLevelSimulator.getMemoryRegions(),
-          traceIndex: traceIndex + 1,
+          traceIndex: newIndex,
           lastAccess,
         });
+
+        // Note: History saving is handled by PlaybackControls component
+        // to avoid duplicate saves during automatic playback
       },
 
-      setOptimizationResults: (optimizationResults) => set({ optimizationResults }),
+      setOptimizationResults: (optimizationResults) =>
+        set({ optimizationResults }),
       setIsOptimizing: (isOptimizing) => set({ isOptimizing }),
 
       saveConfig: (name) => {
@@ -350,7 +368,7 @@ export const useSimulatorStore = create<SimulatorState>()(
       loadConfig: (name) => {
         const saved = get().savedConfigs.find((c) => c.name === name);
         if (saved) {
-          set({ 
+          set({
             multiLevelConfig: saved.config,
             config: saved.config.l1,
             memoryConfig: saved.memoryConfig ?? defaultMemoryConfig,
@@ -364,15 +382,77 @@ export const useSimulatorStore = create<SimulatorState>()(
           savedConfigs: state.savedConfigs.filter((c) => c.name !== name),
         }));
       },
+
+      saveToHistory: async () => {
+        const state = get();
+        const {
+          multiLevelConfig,
+          trace,
+          l1Stats,
+          l2Stats,
+          combinedStats,
+          memoryStats,
+        } = state;
+
+        console.log("[History] Attempting to save to history...", {
+          traceLength: trace.length,
+          totalAccesses: combinedStats.totalAccesses,
+        });
+
+        if (trace.length === 0 || combinedStats.totalAccesses === 0) {
+          console.log("[History] Skipping save - no simulation has run");
+          return; // Don't save if no simulation has run
+        }
+
+        const historyEntry: Omit<SimulationHistoryEntry, "id"> = {
+          timestamp: Date.now(),
+          config: {
+            l1: multiLevelConfig.l1,
+            l2: multiLevelConfig.l2,
+            enabled: multiLevelConfig.enabled,
+          },
+          trace: {
+            length: trace.length,
+          },
+          stats: {
+            l1: multiLevelConfig.enabled.l1 ? l1Stats : undefined,
+            l2: multiLevelConfig.enabled.l2 ? l2Stats : undefined,
+            combined: combinedStats,
+          },
+          memoryStats:
+            memoryStats.totalAccesses > 0
+              ? {
+                  totalReads: memoryStats.totalReads,
+                  totalWrites: memoryStats.totalWrites,
+                  totalAccesses: memoryStats.totalAccesses,
+                  bytesTransferred: memoryStats.bytesTransferred,
+                  averageLatency: memoryStats.averageLatency,
+                }
+              : undefined,
+        };
+
+        try {
+          const id = await saveSimulationToHistory(historyEntry);
+          console.log(
+            "[History] Successfully saved simulation to history with ID:",
+            id,
+          );
+        } catch (error) {
+          console.error(
+            "[History] Failed to save simulation to history:",
+            error,
+          );
+        }
+      },
     }),
     {
-      name: 'cachelab-pro-storage',
+      name: "cachelab-pro-storage",
       partialize: (state) => ({
         multiLevelConfig: state.multiLevelConfig,
         config: state.config,
         memoryConfig: state.memoryConfig,
         savedConfigs: state.savedConfigs,
       }),
-    }
-  )
+    },
+  ),
 );

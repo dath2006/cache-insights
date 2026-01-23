@@ -1,47 +1,57 @@
-import { useEffect, useState } from 'react';
-import { useSimulatorStore } from '@/store/simulatorStore';
-import { StatsBar } from '@/components/simulator/StatsBar';
-import { ConfigPanel } from '@/components/simulator/ConfigPanel';
-import { CacheGrid } from '@/components/simulator/CacheGrid';
-import { PlaybackControls } from '@/components/simulator/PlaybackControls';
-import { Optimizer } from '@/components/simulator/Optimizer';
-import { MemoryPanel } from '@/components/simulator/MemoryPanel';
-import { MemoryVisualizer } from '@/components/simulator/MemoryVisualizer';
-import { ConfigComparison } from '@/components/simulator/ConfigComparison';
-import { CollapsiblePanel } from '@/components/simulator/CollapsiblePanel';
-import { TraceViewer } from '@/components/simulator/TraceViewer';
-import { 
-  parseTraceFile, 
-  generateSequentialTrace, 
-  generateRandomTrace, 
-  generateStridedTrace, 
-  generateTemporalLocalityTrace, 
-  generateWorkingSetTrace, 
-  generateThrashingTrace, 
-  generateLRUKillerTrace, 
-  generateZipfianTrace, 
+import { useEffect, useState } from "react";
+import { useSimulatorStore } from "@/store/simulatorStore";
+import { StatsBar } from "@/components/simulator/StatsBar";
+import { ConfigPanel } from "@/components/simulator/ConfigPanel";
+import { CacheGrid } from "@/components/simulator/CacheGrid";
+import { PlaybackControls } from "@/components/simulator/PlaybackControls";
+import { Optimizer } from "@/components/simulator/Optimizer";
+import { MemoryPanel } from "@/components/simulator/MemoryPanel";
+import { MemoryVisualizer } from "@/components/simulator/MemoryVisualizer";
+import { ConfigComparison } from "@/components/simulator/ConfigComparison";
+import { CollapsiblePanel } from "@/components/simulator/CollapsiblePanel";
+import { TraceViewer } from "@/components/simulator/TraceViewer";
+import {
+  parseTraceFile,
+  generateSequentialTrace,
+  generateRandomTrace,
+  generateStridedTrace,
+  generateTemporalLocalityTrace,
+  generateWorkingSetTrace,
+  generateThrashingTrace,
+  generateLRUKillerTrace,
+  generateZipfianTrace,
   generateScanWithReuseTrace,
   getAllPatternInfos,
   CacheAwareConfig,
   StressLevel,
   TraceGenerationOptions,
   defaultTraceOptions,
-  getStressLevelInfo
-} from '@/lib/cacheSimulator';
-import { Button } from '@/components/ui/button';
-import { Label } from '@/components/ui/label';
-import { Slider } from '@/components/ui/slider';
-import { 
-  Select, 
-  SelectContent, 
-  SelectItem, 
-  SelectTrigger, 
-  SelectValue 
-} from '@/components/ui/select';
-import { Cpu, Settings, FileText, Wand2, Upload, Eye, List } from 'lucide-react';
-import { FloatingTraceViewer } from '@/components/simulator/FloatingTraceViewer';
-import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
-import { cn } from '@/lib/utils';
+  getStressLevelInfo,
+} from "@/lib/cacheSimulator";
+import { Button } from "@/components/ui/button";
+import { Label } from "@/components/ui/label";
+import { Slider } from "@/components/ui/slider";
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select";
+import {
+  Cpu,
+  Settings,
+  FileText,
+  Wand2,
+  Upload,
+  Eye,
+  List,
+  History,
+} from "lucide-react";
+import { FloatingTraceViewer } from "@/components/simulator/FloatingTraceViewer";
+import { HistoryPopup } from "@/components/simulator/HistoryPopup";
+import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { cn } from "@/lib/utils";
 
 const Index = () => {
   const initSimulator = useSimulatorStore((s) => s.initSimulator);
@@ -53,6 +63,7 @@ const Index = () => {
   const [rightPanelOpen, setRightPanelOpen] = useState(true);
   const [optimizerOpen, setOptimizerOpen] = useState(true);
   const [floatingTraceOpen, setFloatingTraceOpen] = useState(false);
+  const [historyOpen, setHistoryOpen] = useState(false);
   const trace = useSimulatorStore((s) => s.trace);
 
   useEffect(() => {
@@ -66,20 +77,20 @@ const Index = () => {
   const rightCollapsed = !rightPanelOpen;
 
   const getLeftColSpan = () => {
-    if (leftCollapsed) return 'lg:col-span-0 lg:hidden';
-    return 'lg:col-span-3';
+    if (leftCollapsed) return "lg:col-span-0 lg:hidden";
+    return "lg:col-span-3";
   };
 
   const getCenterColSpan = () => {
-    if (leftCollapsed && rightCollapsed) return 'lg:col-span-12';
-    if (leftCollapsed) return 'lg:col-span-9';
-    if (rightCollapsed) return 'lg:col-span-9';
-    return 'lg:col-span-6';
+    if (leftCollapsed && rightCollapsed) return "lg:col-span-12";
+    if (leftCollapsed) return "lg:col-span-9";
+    if (rightCollapsed) return "lg:col-span-9";
+    return "lg:col-span-6";
   };
 
   const getRightColSpan = () => {
-    if (rightCollapsed) return 'lg:col-span-0 lg:hidden';
-    return 'lg:col-span-3';
+    if (rightCollapsed) return "lg:col-span-0 lg:hidden";
+    return "lg:col-span-3";
   };
 
   return (
@@ -98,6 +109,15 @@ const Index = () => {
           </div>
         </div>
         <div className="flex items-center gap-3">
+          <Button
+            variant={historyOpen ? "default" : "outline"}
+            size="sm"
+            onClick={() => setHistoryOpen(!historyOpen)}
+            className="flex items-center gap-2"
+          >
+            <History size={16} />
+            <span className="hidden sm:inline">History</span>
+          </Button>
           <Button
             variant={floatingTraceOpen ? "default" : "outline"}
             size="sm"
@@ -118,10 +138,13 @@ const Index = () => {
       </header>
 
       {/* Floating Trace Viewer */}
-      <FloatingTraceViewer 
-        open={floatingTraceOpen} 
-        onClose={() => setFloatingTraceOpen(false)} 
+      <FloatingTraceViewer
+        open={floatingTraceOpen}
+        onClose={() => setFloatingTraceOpen(false)}
       />
+
+      {/* History Popup */}
+      <HistoryPopup open={historyOpen} onClose={() => setHistoryOpen(false)} />
 
       {/* Quick toggles for collapsed panels */}
       {(leftCollapsed || rightCollapsed) && (
@@ -158,7 +181,12 @@ const Index = () => {
       {/* Main Layout */}
       <div className="grid grid-cols-1 lg:grid-cols-12 gap-4 lg:gap-6">
         {/* Left Sidebar - Config & Trace Input */}
-        <div className={cn('space-y-4 transition-all duration-300', getLeftColSpan())}>
+        <div
+          className={cn(
+            "space-y-4 transition-all duration-300",
+            getLeftColSpan(),
+          )}
+        >
           <CollapsiblePanel
             title="Configuration"
             icon={<Settings size={18} className="text-primary" />}
@@ -167,8 +195,12 @@ const Index = () => {
           >
             <Tabs defaultValue="cache" className="w-full">
               <TabsList className="grid w-full grid-cols-2 h-8">
-                <TabsTrigger value="cache" className="text-xs">Cache</TabsTrigger>
-                <TabsTrigger value="memory" className="text-xs">Memory</TabsTrigger>
+                <TabsTrigger value="cache" className="text-xs">
+                  Cache
+                </TabsTrigger>
+                <TabsTrigger value="memory" className="text-xs">
+                  Memory
+                </TabsTrigger>
               </TabsList>
               <TabsContent value="cache" className="mt-3">
                 <ConfigPanel />
@@ -190,12 +222,17 @@ const Index = () => {
         </div>
 
         {/* Main Content - Cache Grid & Controls */}
-        <div className={cn('space-y-4 transition-all duration-300', getCenterColSpan())}>
+        <div
+          className={cn(
+            "space-y-4 transition-all duration-300",
+            getCenterColSpan(),
+          )}
+        >
           <div className="transition-all duration-300">
             <CacheGrid />
           </div>
           <PlaybackControls />
-          
+
           <CollapsiblePanel
             title="Sweet Spot Optimizer"
             icon={<Wand2 size={18} className="text-primary" />}
@@ -208,8 +245,8 @@ const Index = () => {
         </div>
 
         {/* Right Sidebar - Memory Hierarchy Visualization */}
-        <div className={cn('transition-all duration-300', getRightColSpan())}>
-          <MemoryVisualizer 
+        <div className={cn("transition-all duration-300", getRightColSpan())}>
+          <MemoryVisualizer
             defaultOpen={rightPanelOpen}
             onToggle={setRightPanelOpen}
           />
@@ -224,24 +261,46 @@ function TraceInputContent() {
   const setTrace = useSimulatorStore((s) => s.setTrace);
   const trace = useSimulatorStore((s) => s.trace);
   const multiLevelConfig = useSimulatorStore((s) => s.multiLevelConfig);
-  
-  const [pattern, setPattern] = useState<'sequential' | 'random' | 'strided' | 'temporal' | 'workingset' | 'thrashing' | 'lrukiller' | 'zipfian' | 'scanreuse'>('sequential');
+
+  const [pattern, setPattern] = useState<
+    | "sequential"
+    | "random"
+    | "strided"
+    | "temporal"
+    | "workingset"
+    | "thrashing"
+    | "lrukiller"
+    | "zipfian"
+    | "scanreuse"
+  >("sequential");
   const [traceSize, setTraceSize] = useState(1000);
   const [isDragOver, setIsDragOver] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
   const [showPatternDetails, setShowPatternDetails] = useState(false);
-  const [stressLevel, setStressLevel] = useState<StressLevel>('moderate');
+  const [stressLevel, setStressLevel] = useState<StressLevel>("moderate");
   const [showAdvanced, setShowAdvanced] = useState(false);
   const [writeRatio, setWriteRatio] = useState<number | undefined>(undefined);
 
   // Get cache-aware config from current settings
   const getCacheConfig = (): CacheAwareConfig => ({
-    l1CacheSize: multiLevelConfig.enabled.l1 ? multiLevelConfig.l1.cacheSize : undefined,
-    l1BlockSize: multiLevelConfig.enabled.l1 ? multiLevelConfig.l1.blockSize : undefined,
-    l1Associativity: multiLevelConfig.enabled.l1 ? multiLevelConfig.l1.associativity : undefined,
-    l2CacheSize: multiLevelConfig.enabled.l2 ? multiLevelConfig.l2.cacheSize : undefined,
-    l2BlockSize: multiLevelConfig.enabled.l2 ? multiLevelConfig.l2.blockSize : undefined,
-    l2Associativity: multiLevelConfig.enabled.l2 ? multiLevelConfig.l2.associativity : undefined,
+    l1CacheSize: multiLevelConfig.enabled.l1
+      ? multiLevelConfig.l1.cacheSize
+      : undefined,
+    l1BlockSize: multiLevelConfig.enabled.l1
+      ? multiLevelConfig.l1.blockSize
+      : undefined,
+    l1Associativity: multiLevelConfig.enabled.l1
+      ? multiLevelConfig.l1.associativity
+      : undefined,
+    l2CacheSize: multiLevelConfig.enabled.l2
+      ? multiLevelConfig.l2.cacheSize
+      : undefined,
+    l2BlockSize: multiLevelConfig.enabled.l2
+      ? multiLevelConfig.l2.blockSize
+      : undefined,
+    l2Associativity: multiLevelConfig.enabled.l2
+      ? multiLevelConfig.l2.associativity
+      : undefined,
   });
 
   // Get trace generation options based on stress level
@@ -262,35 +321,98 @@ function TraceInputContent() {
     let newTrace;
 
     switch (pattern) {
-      case 'sequential':
-        newTrace = generateSequentialTrace(baseAddress, traceSize, 4, cacheConfig, traceOptions);
+      case "sequential":
+        newTrace = generateSequentialTrace(
+          baseAddress,
+          traceSize,
+          4,
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'random':
-        newTrace = generateRandomTrace(baseAddress, 0x100000, traceSize, cacheConfig, traceOptions);
+      case "random":
+        newTrace = generateRandomTrace(
+          baseAddress,
+          0x100000,
+          traceSize,
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'strided':
-        newTrace = generateStridedTrace(baseAddress, traceSize, 0, cacheConfig, traceOptions);
+      case "strided":
+        newTrace = generateStridedTrace(
+          baseAddress,
+          traceSize,
+          0,
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'temporal':
-        newTrace = generateTemporalLocalityTrace(baseAddress, 0, 0, Math.max(1, Math.floor(traceSize / 500)), cacheConfig, traceOptions);
+      case "temporal":
+        newTrace = generateTemporalLocalityTrace(
+          baseAddress,
+          0,
+          0,
+          Math.max(1, Math.floor(traceSize / 500)),
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'workingset':
-        newTrace = generateWorkingSetTrace(baseAddress, 0, traceSize, cacheConfig, traceOptions);
+      case "workingset":
+        newTrace = generateWorkingSetTrace(
+          baseAddress,
+          0,
+          traceSize,
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'thrashing':
-        newTrace = generateThrashingTrace(baseAddress, 0, traceSize, cacheConfig, traceOptions);
+      case "thrashing":
+        newTrace = generateThrashingTrace(
+          baseAddress,
+          0,
+          traceSize,
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'lrukiller':
-        newTrace = generateLRUKillerTrace(baseAddress, 0, traceSize, cacheConfig, traceOptions);
+      case "lrukiller":
+        newTrace = generateLRUKillerTrace(
+          baseAddress,
+          0,
+          traceSize,
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'zipfian':
-        newTrace = generateZipfianTrace(baseAddress, 0, traceSize, 1.2, cacheConfig, traceOptions);
+      case "zipfian":
+        newTrace = generateZipfianTrace(
+          baseAddress,
+          0,
+          traceSize,
+          1.2,
+          cacheConfig,
+          traceOptions,
+        );
         break;
-      case 'scanreuse':
-        newTrace = generateScanWithReuseTrace(baseAddress, 0, 0, traceSize, cacheConfig, traceOptions);
+      case "scanreuse":
+        newTrace = generateScanWithReuseTrace(
+          baseAddress,
+          0,
+          0,
+          traceSize,
+          cacheConfig,
+          traceOptions,
+        );
         break;
       default:
-        newTrace = generateSequentialTrace(baseAddress, traceSize, 4, cacheConfig, traceOptions);
+        newTrace = generateSequentialTrace(
+          baseAddress,
+          traceSize,
+          4,
+          cacheConfig,
+          traceOptions,
+        );
     }
 
     setTrace(newTrace);
@@ -344,8 +466,8 @@ function TraceInputContent() {
         onDragLeave={() => setIsDragOver(false)}
         className={`border-2 border-dashed rounded-lg p-3 text-center transition-colors ${
           isDragOver
-            ? 'border-primary bg-primary/10'
-            : 'border-border hover:border-primary/50'
+            ? "border-primary bg-primary/10"
+            : "border-border hover:border-primary/50"
         }`}
       >
         <Upload className="mx-auto text-muted-foreground mb-1" size={18} />
@@ -362,7 +484,12 @@ function TraceInputContent() {
               if (file) handleFileUpload(file);
             }}
           />
-          <Button variant="outline" size="sm" className="cursor-pointer text-[10px] h-6" asChild>
+          <Button
+            variant="outline"
+            size="sm"
+            className="cursor-pointer text-[10px] h-6"
+            asChild
+          >
             <span>Browse</span>
           </Button>
         </label>
@@ -370,7 +497,9 @@ function TraceInputContent() {
 
       <div className="relative flex items-center">
         <div className="flex-1 border-t border-border" />
-        <span className="px-2 text-[10px] text-muted-foreground">or generate</span>
+        <span className="px-2 text-[10px] text-muted-foreground">
+          or generate
+        </span>
         <div className="flex-1 border-t border-border" />
       </div>
 
@@ -394,45 +523,51 @@ function TraceInputContent() {
               <SelectItem value="scanreuse">Scan+Reuse</SelectItem>
             </SelectContent>
           </Select>
-          
+
           {/* Pattern Description */}
-          <p className="text-xs text-muted-foreground">{currentPatternInfo?.description}</p>
-          
+          <p className="text-xs text-muted-foreground">
+            {currentPatternInfo?.description}
+          </p>
+
           {/* Stress Level Selector */}
           <div className="space-y-1.5 mt-2">
             <Label className="text-[10px]">Stress Level</Label>
             <div className="flex gap-1">
-              {(['light', 'moderate', 'heavy', 'extreme'] as StressLevel[]).map((level) => (
-                <button
-                  key={level}
-                  onClick={() => setStressLevel(level)}
-                  className={cn(
-                    "flex-1 px-2 py-1 text-[10px] rounded border transition-colors capitalize",
-                    stressLevel === level
-                      ? "bg-primary text-primary-foreground border-primary"
-                      : "bg-muted/50 border-border hover:border-primary/50"
-                  )}
-                >
-                  {level}
-                </button>
-              ))}
+              {(["light", "moderate", "heavy", "extreme"] as StressLevel[]).map(
+                (level) => (
+                  <button
+                    key={level}
+                    onClick={() => setStressLevel(level)}
+                    className={cn(
+                      "flex-1 px-2 py-1 text-[10px] rounded border transition-colors capitalize",
+                      stressLevel === level
+                        ? "bg-primary text-primary-foreground border-primary"
+                        : "bg-muted/50 border-border hover:border-primary/50",
+                    )}
+                  >
+                    {level}
+                  </button>
+                ),
+              )}
             </div>
             <p className="text-[10px] text-muted-foreground mt-1">
               {stressInfo.description} • {stressInfo.expectedHitRate}
             </p>
             {currentPatternInfo?.stressInfo && (
-              <p className="text-[10px] text-primary/80">{currentPatternInfo.stressInfo}</p>
+              <p className="text-[10px] text-primary/80">
+                {currentPatternInfo.stressInfo}
+              </p>
             )}
           </div>
-          
+
           {/* Toggle for more details */}
-          <button 
+          <button
             onClick={() => setShowPatternDetails(!showPatternDetails)}
             className="text-xs text-primary hover:underline font-medium"
           >
-            {showPatternDetails ? '− Hide details' : '+ Show what it tests'}
+            {showPatternDetails ? "− Hide details" : "+ Show what it tests"}
           </button>
-          
+
           {/* Detailed Pattern Info */}
           {showPatternDetails && currentPatternInfo && (
             <div className="mt-2 p-3 bg-muted/50 rounded-lg space-y-3 text-xs">
@@ -446,7 +581,9 @@ function TraceInputContent() {
               </div>
               <div>
                 <span className="font-semibold text-foreground">Expected:</span>
-                <p className="text-muted-foreground mt-1">{currentPatternInfo.expectedBehavior}</p>
+                <p className="text-muted-foreground mt-1">
+                  {currentPatternInfo.expectedBehavior}
+                </p>
               </div>
               <div className="grid grid-cols-2 gap-3">
                 <div>
@@ -458,7 +595,9 @@ function TraceInputContent() {
                   </ul>
                 </div>
                 <div>
-                  <span className="font-semibold text-destructive">Worst for:</span>
+                  <span className="font-semibold text-destructive">
+                    Worst for:
+                  </span>
                   <ul className="text-muted-foreground mt-1">
                     {currentPatternInfo.worstFor.map((w, i) => (
                       <li key={i}>• {w}</li>

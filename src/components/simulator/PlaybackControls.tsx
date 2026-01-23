@@ -1,8 +1,15 @@
-import { useSimulatorStore } from '@/store/simulatorStore';
-import { Button } from '@/components/ui/button';
-import { Slider } from '@/components/ui/slider';
-import { Play, Pause, SkipForward, RotateCcw, FastForward } from 'lucide-react';
-import { useEffect, useRef } from 'react';
+import { useSimulatorStore } from "@/store/simulatorStore";
+import { Button } from "@/components/ui/button";
+import { Slider } from "@/components/ui/slider";
+import {
+  Play,
+  Pause,
+  SkipForward,
+  RotateCcw,
+  FastForward,
+  Save,
+} from "lucide-react";
+import { useEffect, useRef } from "react";
 
 export function PlaybackControls() {
   const trace = useSimulatorStore((s) => s.trace);
@@ -13,6 +20,7 @@ export function PlaybackControls() {
   const setPlaybackSpeed = useSimulatorStore((s) => s.setPlaybackSpeed);
   const stepForward = useSimulatorStore((s) => s.stepForward);
   const resetSimulator = useSimulatorStore((s) => s.resetSimulator);
+  const saveToHistory = useSimulatorStore((s) => s.saveToHistory);
 
   const intervalRef = useRef<number | null>(null);
 
@@ -21,16 +29,16 @@ export function PlaybackControls() {
   const hasTrace = trace.length > 0;
 
   useEffect(() => {
-    if (playbackState === 'playing' && !isComplete) {
+    if (playbackState === "playing" && !isComplete) {
       // Speed scaling:
       // 1x = 500ms interval (2 steps/sec) - slow for observation
       // 10x = 50ms interval (20 steps/sec)
       // 100x = 16ms interval with 2 steps (120 steps/sec)
       // 1000x = 16ms interval with 16 steps (1000 steps/sec)
-      
+
       let interval: number;
       let stepsPerTick: number;
-      
+
       if (playbackSpeed <= 30) {
         // Low speeds: adjust interval, 1 step per tick
         interval = Math.max(16, 500 / playbackSpeed);
@@ -40,7 +48,7 @@ export function PlaybackControls() {
         interval = 16; // ~60fps
         stepsPerTick = Math.ceil(playbackSpeed / 60);
       }
-      
+
       intervalRef.current = window.setInterval(() => {
         for (let i = 0; i < stepsPerTick; i++) {
           stepForward();
@@ -51,8 +59,13 @@ export function PlaybackControls() {
         clearInterval(intervalRef.current);
         intervalRef.current = null;
       }
-      if (isComplete && playbackState === 'playing') {
-        setPlaybackState('idle');
+      if (isComplete && playbackState === "playing") {
+        setPlaybackState("idle");
+        // Save to history when simulation completes
+        console.log("[History] Simulation complete, saving to history...");
+        saveToHistory().catch((err) =>
+          console.error("[History] Failed to save history:", err),
+        );
       }
     }
 
@@ -61,18 +74,42 @@ export function PlaybackControls() {
         clearInterval(intervalRef.current);
       }
     };
-  }, [playbackState, playbackSpeed, isComplete, stepForward, setPlaybackState]);
+  }, [
+    playbackState,
+    playbackSpeed,
+    isComplete,
+    stepForward,
+    setPlaybackState,
+    saveToHistory,
+  ]);
 
   const handlePlayPause = () => {
-    if (playbackState === 'playing') {
-      setPlaybackState('paused');
+    if (playbackState === "playing") {
+      setPlaybackState("paused");
     } else {
-      setPlaybackState('playing');
+      setPlaybackState("playing");
     }
   };
 
   const handleReset = () => {
     resetSimulator();
+  };
+
+  const handleStepForward = () => {
+    const wasAtEnd = traceIndex === trace.length - 1;
+    stepForward();
+
+    // If this step completes the simulation, save to history
+    if (wasAtEnd) {
+      console.log(
+        "[History] Simulation completed via stepping, saving to history...",
+      );
+      setTimeout(() => {
+        saveToHistory().catch((err) =>
+          console.error("[History] Failed to save history:", err),
+        );
+      }, 100); // Small delay to ensure state is updated
+    }
   };
 
   return (
@@ -112,17 +149,35 @@ export function PlaybackControls() {
             disabled={!hasTrace || isComplete}
             className="bg-primary hover:bg-primary/90 text-primary-foreground"
           >
-            {playbackState === 'playing' ? <Pause size={16} /> : <Play size={16} />}
+            {playbackState === "playing" ? (
+              <Pause size={16} />
+            ) : (
+              <Play size={16} />
+            )}
           </Button>
 
           <Button
             size="icon"
             variant="outline"
-            onClick={stepForward}
+            onClick={handleStepForward}
             disabled={!hasTrace || isComplete}
             className="border-border"
           >
             <SkipForward size={16} />
+          </Button>
+
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => {
+              console.log("[History] Manual save triggered");
+              saveToHistory();
+            }}
+            disabled={!hasTrace || traceIndex === 0}
+            className="border-border"
+            title="Save to History"
+          >
+            <Save size={16} />
           </Button>
         </div>
 
@@ -147,9 +202,9 @@ export function PlaybackControls() {
                 size="sm"
                 variant={playbackSpeed === speed ? "default" : "outline"}
                 className={`h-6 px-2 text-[10px] font-mono ${
-                  playbackSpeed === speed 
-                    ? 'bg-primary text-primary-foreground' 
-                    : 'border-border hover:bg-muted'
+                  playbackSpeed === speed
+                    ? "bg-primary text-primary-foreground"
+                    : "border-border hover:bg-muted"
                 }`}
                 onClick={() => setPlaybackSpeed(speed)}
               >
