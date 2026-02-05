@@ -142,10 +142,21 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
   // Virtualization state
   const [scrollTop, setScrollTop] = useState(0);
 
-  // Use L1 config if enabled, otherwise L2
-  const config = multiLevelConfig.enabled.l1 
-    ? multiLevelConfig.l1 
-    : multiLevelConfig.l2;
+  const [selectedLevel, setSelectedLevel] = useState<'l1' | 'l2'>('l1');
+  
+  // Update selected level if current becomes disabled, or on initial load
+  useEffect(() => {
+    if (multiLevelConfig.enabled.l1) {
+      // Prefer L1 if enabled
+      if (!multiLevelConfig.enabled.l2 && selectedLevel === 'l2') setSelectedLevel('l1');
+    } else if (multiLevelConfig.enabled.l2) {
+      // If L1 disabled and L2 enabled, must show L2
+      if (selectedLevel === 'l1') setSelectedLevel('l2');
+    }
+  }, [multiLevelConfig.enabled.l1, multiLevelConfig.enabled.l2, selectedLevel]);
+
+  // Use selected config
+  const config = multiLevelConfig[selectedLevel];
 
   // Memoize bit calculations
   const { offsetBits, indexBits } = useMemo(() => {
@@ -362,6 +373,35 @@ export function FloatingTraceViewer({ open, onClose }: FloatingTraceViewerProps)
               Step {traceIndex}
             </Badge>
           )}
+
+          
+          <div className="flex items-center bg-background/50 rounded-md border border-border/50 p-0.5 ml-2 h-6">
+            <button
+              onClick={() => multiLevelConfig.enabled.l1 && setSelectedLevel('l1')}
+              disabled={!multiLevelConfig.enabled.l1}
+              className={cn(
+                "px-2 text-[10px] rounded-sm transition-colors",
+                selectedLevel === 'l1' 
+                  ? "bg-primary/20 text-primary font-medium" 
+                  : "text-muted-foreground hover:bg-muted"
+              )}
+            >
+              L1
+            </button>
+            <div className="w-px h-3 bg-border/50 mx-0.5" />
+            <button
+              onClick={() => multiLevelConfig.enabled.l2 && setSelectedLevel('l2')}
+              disabled={!multiLevelConfig.enabled.l2}
+              className={cn(
+                "px-2 text-[10px] rounded-sm transition-colors",
+                selectedLevel === 'l2' 
+                  ? "bg-primary/20 text-primary font-medium" 
+                  : "text-muted-foreground hover:bg-muted"
+              )}
+            >
+              L2
+            </button>
+          </div>
         </div>
         <div className="flex items-center gap-1">
           <Button

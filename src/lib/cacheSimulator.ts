@@ -758,6 +758,85 @@ export function parseTraceFile(content: string): TraceEntry[] {
   return entries;
 }
 
+// Chunked trace file parser for large files
+export async function parseTraceFileChunked(
+  content: string,
+  onProgress?: (percent: number) => void
+): Promise<TraceEntry[]> {
+  const lines = content.trim().split('\n');
+  const entries: TraceEntry[] = [];
+  const chunkSize = 10000; // Process 10k lines at a time
+  
+  for (let i = 0; i < lines.length; i += chunkSize) {
+    const chunk = lines.slice(i, Math.min(i + chunkSize, lines.length));
+    
+    for (const line of chunk) {
+      const trimmed = line.trim();
+      if (!trimmed || trimmed.startsWith('#')) continue;
+      
+      // Format: R/W <hex_address> or just <hex_address>
+      const parts = trimmed.split(/\s+/);
+      
+      if (parts.length >= 2) {
+        const isWrite = parts[0].toUpperCase() === 'W';
+        const address = parseInt(parts[1], 16);
+        if (!isNaN(address)) {
+          entries.push({ isWrite, address });
+        }
+      } else if (parts.length === 1) {
+        const address = parseInt(parts[0], 16);
+        if (!isNaN(address)) {
+          entries.push({ isWrite: false, address });
+        }
+      }
+    }
+    
+    // Report progress
+    if (onProgress) {
+      onProgress(Math.round((i / lines.length) * 100));
+    }
+    
+    // Yield to browser to prevent freezing
+    await new Promise(resolve => setTimeout(resolve, 0));
+  }
+  
+  return entries;
+}
+
+// Sampled trace file parser for very large files (loads every Nth line)
+export function parseTraceFileSampled(
+  content: string,
+  sampleRate: number = 10
+): TraceEntry[] {
+  const lines = content.trim().split('\n');
+  const entries: TraceEntry[] = [];
+  
+  for (let i = 0; i < lines.length; i += sampleRate) {
+    const line = lines[i];
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    
+    // Format: R/W <hex_address> or just <hex_address>
+    const parts = trimmed.split(/\s+/);
+    
+    if (parts.length >= 2) {
+      const isWrite = parts[0].toUpperCase() === 'W';
+      const address = parseInt(parts[1], 16);
+      if (!isNaN(address)) {
+        entries.push({ isWrite, address });
+      }
+    } else if (parts.length === 1) {
+      const address = parseInt(parts[0], 16);
+      if (!isNaN(address)) {
+        entries.push({ isWrite: false, address });
+      }
+    }
+  }
+  
+  return entries;
+}
+
+
 // Pattern generators - Cache-Aware versions
 
 // Configuration interface for cache-aware trace generation

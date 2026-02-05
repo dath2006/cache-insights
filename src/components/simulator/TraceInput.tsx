@@ -1,6 +1,8 @@
 import { useSimulatorStore } from '@/store/simulatorStore';
 import {
   parseTraceFile,
+  parseTraceFileChunked,
+  parseTraceFileSampled,
   generateSequentialTrace,
   generateRandomTrace,
   generateStridedTrace,
@@ -47,6 +49,8 @@ export function TraceInput() {
   const [traceSize, setTraceSize] = useState(1000);
   const [isDragOver, setIsDragOver] = useState(false);
   const [viewerOpen, setViewerOpen] = useState(false);
+  const [isLoading, setIsLoading] = useState(false);
+  const [loadProgress, setLoadProgress] = useState(0);
 
   const generateTrace = useCallback(() => {
     const baseAddress = 0x10000;
@@ -88,16 +92,61 @@ export function TraceInput() {
   }, [pattern, traceSize, setTrace]);
 
   const handleFileUpload = useCallback(
-    (file: File) => {
-      const reader = new FileReader();
-      reader.onload = (e) => {
-        const content = e.target?.result as string;
-        const parsedTrace = parseTraceFile(content);
-        if (parsedTrace.length > 0) {
-          setTrace(parsedTrace);
+    async (file: File) => {
+      const fileSizeMB = file.size / (1024 * 1024);
+      
+      // Warn for large files
+      if (fileSizeMB > 50) {
+        const proceed = confirm(
+          `This file is ${fileSizeMB.toFixed(1)}MB. Large files may take time to process. Continue?`
+        );
+        if (!proceed) return;
+      }
+      
+      setIsLoading(true);
+      setLoadProgress(0);
+      
+      try {
+        const content = await file.text();
+        
+        // For very large files, offer sampling
+        if (fileSizeMB > 100) {
+          const useSampling = confirm(
+            `This file is very large (${fileSizeMB.toFixed(1)}MB, ~${(content.split('\n').length / 1000).toFixed(0)}K lines). \n\n` +
+            `Load every 10th line for faster preview? (Click Cancel to load all lines)`
+          );
+          
+          if (useSampling) {
+            const parsedTrace = parseTraceFileSampled(content, 10);
+            if (parsedTrace.length > 0) {
+              setTrace(parsedTrace);
+            }
+          } else {
+            const parsedTrace = await parseTraceFileChunked(content, setLoadProgress);
+            if (parsedTrace.length > 0) {
+              setTrace(parsedTrace);
+            }
+          }
+        } else if (fileSizeMB > 10) {
+          // Use chunked parsing for medium-large files
+          const parsedTrace = await parseTraceFileChunked(content, setLoadProgress);
+          if (parsedTrace.length > 0) {
+            setTrace(parsedTrace);
+          }
+        } else {
+          // Use synchronous parsing for small files
+          const parsedTrace = parseTraceFile(content);
+          if (parsedTrace.length > 0) {
+            setTrace(parsedTrace);
+          }
         }
-      };
-      reader.readAsText(file);
+      } catch (error) {
+        console.error('Failed to parse trace file:', error);
+        alert('Failed to parse trace file. Please check the format.');
+      } finally {
+        setIsLoading(false);
+        setLoadProgress(0);
+      }
     },
     [setTrace]
   );
@@ -161,27 +210,49 @@ export function TraceInput() {
             : 'border-border hover:border-primary/50'
         }`}
       >
-        <Upload className="mx-auto text-muted-foreground mb-2" size={24} />
-        <p className="text-sm text-muted-foreground mb-2">
-          Drop a .trace file here or
-        </p>
-        <label>
-          <input
-            type="file"
-            accept=".trace,.txt"
-            className="hidden"
-            onChange={(e) => {
-              const file = e.target.files?.[0];
-              if (file) handleFileUpload(file);
-            }}
-          />
-          <Button variant="outline" size="sm" className="cursor-pointer" asChild>
-            <span>Browse Files</span>
-          </Button>
-        </label>
-        <p className="text-xs text-muted-foreground mt-2">
-          Format: R/W &lt;hex_address&gt; per line
-        </p>
+        {isLoading ? (
+          <div className="space-y-3">
+            <div className="flex items-center justify-center gap-2">
+              <div className="animate-spin rounded-full h-5 w-5 border-2 border-primary border-t-transparent" />
+              <span className="text-sm text-muted-foreground">Loading trace file...</span>
+            </div>
+            {loadProgress > 0 && (
+              <div className="space-y-1">
+                <div className="w-full bg-muted rounded-full h-2 overflow-hidden">
+                  <div 
+                    className="h-full bg-primary transition-all duration-300"
+                    style={{ width: `${loadProgress}%` }}
+                  />
+                </div>
+                <p className="text-xs text-muted-foreground">{loadProgress}%</p>
+              </div>
+            )}
+          </div>
+        ) : (
+          <>
+            <Upload className="mx-auto text-muted-foreground mb-2" size={24} />
+            <p className="text-sm text-muted-foreground mb-2">
+              Drop a .trace file here or
+            </p>
+            <label>
+              <input
+                type="file"
+                accept=".trace,.txt"
+                className="hidden"
+                onChange={(e) => {
+                  const file = e.target.files?.[0];
+                  if (file) handleFileUpload(file);
+                }}
+              />
+              <Button variant="outline" size="sm" className="cursor-pointer" asChild>
+                <span>Browse Files</span>
+              </Button>
+            </label>
+            <p className="text-xs text-muted-foreground mt-2">
+              Format: R/W &lt;hex_address&gt; per line
+            </p>
+          </>
+        )}
       </div>
 
       <div className="relative flex items-center">

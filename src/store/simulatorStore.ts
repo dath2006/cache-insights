@@ -107,6 +107,7 @@ interface SimulatorState {
   setPlaybackState: (state: PlaybackState) => void;
   setPlaybackSpeed: (speed: number) => void;
   stepForward: () => void;
+  skipToEnd: () => void;
 
   // Optimization
   optimizationResults: OptimizationResult[];
@@ -353,6 +354,44 @@ export const useSimulatorStore = create<SimulatorState>()(
       setOptimizationResults: (optimizationResults) =>
         set({ optimizationResults }),
       setIsOptimizing: (isOptimizing) => set({ isOptimizing }),
+
+      skipToEnd: () => {
+        const { multiLevelSimulator, trace, traceIndex } = get();
+        if (!multiLevelSimulator || traceIndex >= trace.length) {
+          return;
+        }
+
+        // Process all remaining trace entries at once
+        for (let i = traceIndex; i < trace.length; i++) {
+          const entry = trace[i];
+          multiLevelSimulator.access(entry.address, entry.isWrite);
+        }
+
+        // Update state to completion
+        const l1 = multiLevelSimulator.getL1();
+        const l2 = multiLevelSimulator.getL2();
+
+        set({
+          traceIndex: trace.length,
+          playbackState: "idle",
+          l1CacheSets: l1?.getSets() ?? [],
+          l2CacheSets: l2?.getSets() ?? [],
+          cacheSets: l1?.getSets() ?? [],
+          l1Stats: l1?.getStats() || null,
+          l2Stats: l2?.getStats() || null,
+          combinedStats: multiLevelSimulator.getCombinedStats(),
+          stats: l1?.getStats() ?? defaultStats,
+          memoryStats: multiLevelSimulator.getMemoryStats(),
+          memoryRegions: multiLevelSimulator.getMemoryRegions(),
+          lastAccess: null,
+        });
+
+        // Save to history after completion
+        console.log("[History] Quick finish completed, saving to history...");
+        get().saveToHistory().catch((err) =>
+          console.error("[History] Failed to save history:", err)
+        );
+      },
 
       saveConfig: (name) => {
         const config = get().multiLevelConfig;

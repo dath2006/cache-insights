@@ -8,6 +8,8 @@ import {
 } from '@/components/ui/dialog';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { Badge } from '@/components/ui/badge';
+import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
+import { useState, useEffect } from 'react';
 
 interface TraceViewerProps {
   open: boolean;
@@ -19,10 +21,18 @@ export function TraceViewer({ open, onOpenChange }: TraceViewerProps) {
   const multiLevelConfig = useSimulatorStore((s) => s.multiLevelConfig);
   const traceIndex = useSimulatorStore((s) => s.traceIndex);
 
-  // Use L1 config if enabled, otherwise L2
-  const config = multiLevelConfig.enabled.l1 
-    ? multiLevelConfig.l1 
-    : multiLevelConfig.l2;
+  const [selectedLevel, setSelectedLevel] = useState<'l1' | 'l2'>('l1');
+
+  // Initialize selected level based on what's enabled
+  useEffect(() => {
+    if (open) {
+      if (multiLevelConfig.enabled.l1) setSelectedLevel('l1');
+      else if (multiLevelConfig.enabled.l2) setSelectedLevel('l2');
+    }
+  }, [open, multiLevelConfig.enabled.l1, multiLevelConfig.enabled.l2]);
+
+  // Use selected config
+  const config = multiLevelConfig[selectedLevel];
 
   // Calculate address components
   const offsetBits = Math.log2(config.blockSize);
@@ -55,6 +65,38 @@ export function TraceViewer({ open, onOpenChange }: TraceViewerProps) {
             Showing memory access trace with address breakdown (Tag | Index | Offset)
           </DialogDescription>
         </DialogHeader>
+
+        {/* Level Controls */}
+        <div className="px-4 py-2 border-b border-border/50 flex items-center justify-between bg-muted/20">
+          <Tabs 
+            value={selectedLevel} 
+            onValueChange={(v) => setSelectedLevel(v as 'l1' | 'l2')}
+            className="w-full max-w-[200px]"
+          >
+            <TabsList className="grid w-full grid-cols-2 h-8">
+              <TabsTrigger 
+                value="l1" 
+                disabled={!multiLevelConfig.enabled.l1}
+                className="text-xs"
+              >
+                L1 Cache
+              </TabsTrigger>
+              <TabsTrigger 
+                value="l2" 
+                disabled={!multiLevelConfig.enabled.l2}
+                className="text-xs"
+              >
+                L2 Cache
+              </TabsTrigger>
+            </TabsList>
+          </Tabs>
+          
+          <div className="flex gap-2 text-xs text-muted-foreground font-mono">
+            <span>Size: {(config.cacheSize / 1024).toFixed(0)}KB</span>
+            <span>Block: {config.blockSize}B</span>
+            <span>Assoc: {config.associativity}</span>
+          </div>
+        </div>
 
         {/* Legend */}
         <div className="grid grid-cols-2 md:grid-cols-4 gap-3 p-4 bg-muted/50 rounded-lg text-sm">
@@ -143,7 +185,7 @@ export function TraceViewer({ open, onOpenChange }: TraceViewerProps) {
           <p><strong>Index:</strong> Determines which cache set the address maps to.</p>
           <p><strong>Offset:</strong> Byte position within the cache block.</p>
           <p className="pt-2 border-t border-border mt-2">
-            Current config: {offsetBits} offset bits, {indexBits} index bits, {32 - offsetBits - indexBits} tag bits
+            Current config ({selectedLevel.toUpperCase()}): {offsetBits} offset bits, {indexBits} index bits, {32 - offsetBits - indexBits} tag bits
           </p>
         </div>
       </DialogContent>

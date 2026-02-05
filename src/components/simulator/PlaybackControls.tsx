@@ -8,6 +8,7 @@ import {
   RotateCcw,
   FastForward,
   Save,
+  ChevronsRight,
 } from "lucide-react";
 import { useEffect, useRef } from "react";
 
@@ -19,6 +20,7 @@ export function PlaybackControls() {
   const setPlaybackState = useSimulatorStore((s) => s.setPlaybackState);
   const setPlaybackSpeed = useSimulatorStore((s) => s.setPlaybackSpeed);
   const stepForward = useSimulatorStore((s) => s.stepForward);
+  const skipToEnd = useSimulatorStore((s) => s.skipToEnd);
   const resetSimulator = useSimulatorStore((s) => s.resetSimulator);
   const saveToHistory = useSimulatorStore((s) => s.saveToHistory);
 
@@ -30,11 +32,11 @@ export function PlaybackControls() {
 
   useEffect(() => {
     if (playbackState === "playing" && !isComplete) {
-      // Speed scaling:
+      // Speed scaling with exponential growth for high speeds:
       // 1x = 500ms interval (2 steps/sec) - slow for observation
       // 10x = 50ms interval (20 steps/sec)
-      // 100x = 16ms interval with 2 steps (120 steps/sec)
-      // 1000x = 16ms interval with 16 steps (1000 steps/sec)
+      // 100x = 16ms interval with ~7 steps (400 steps/sec)
+      // 500x = 16ms interval with ~30 steps (2000 steps/sec)
 
       let interval: number;
       let stepsPerTick: number;
@@ -43,10 +45,14 @@ export function PlaybackControls() {
         // Low speeds: adjust interval, 1 step per tick
         interval = Math.max(16, 500 / playbackSpeed);
         stepsPerTick = 1;
-      } else {
-        // High speeds: fixed interval, multiple steps per tick
+      } else if (playbackSpeed <= 100) {
+        // Medium-high speeds: fixed interval, linear scaling
         interval = 16; // ~60fps
-        stepsPerTick = Math.ceil(playbackSpeed / 60);
+        stepsPerTick = Math.ceil(playbackSpeed / 15);
+      } else {
+        // Very high speeds: exponential scaling for noticeable difference
+        interval = 16;
+        stepsPerTick = Math.ceil(Math.pow(playbackSpeed / 50, 1.5));
       }
 
       intervalRef.current = window.setInterval(() => {
@@ -164,6 +170,19 @@ export function PlaybackControls() {
             className="border-border"
           >
             <SkipForward size={16} />
+          </Button>
+
+          <Button
+            size="icon"
+            variant="outline"
+            onClick={() => {
+              skipToEnd();
+            }}
+            disabled={!hasTrace || isComplete}
+            className="border-border"
+            title="Quick Finish (Skip to End)"
+          >
+            <ChevronsRight size={16} />
           </Button>
 
           <Button
